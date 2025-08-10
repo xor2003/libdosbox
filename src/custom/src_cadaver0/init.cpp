@@ -13,7 +13,7 @@ bool masm2c_init(char *name, unsigned short reloc, unsigned short _cs, unsigned 
 
 	init_get_fname(fname, name);
 	printf("%s\n", fname);
-	if (strcmp(fname, "game.exe_")) return false;
+	if (strcmp(fname, "cfix.exe")) return false;
 
 	return true;
 }

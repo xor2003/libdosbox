@@ -188,8 +188,9 @@ if (trace_instructions)
 {
   print_instruction(SegBase(cs)>>4,cpu_regs.ip.dword[0]);
 }
-//    compare_jump = false;
+
                 if (collect_rt_info) m2c::shadow_memory.collect_segs();
+//    compare_jump = false;
 
 		core.opcode_index=cpu.code.big*0x200;
 		core.prefixes=cpu.code.big;

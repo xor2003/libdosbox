@@ -30,9 +30,9 @@ bool compare_mode = false;
 bool complex_self_modifications = false;
 // Enable/disable collection of run-time information like code addresses and
 // segment values.
-bool collect_rt_info = false;
+bool collect_rt_info = true;
 // Enable/disable collection of memory access information (slower).
-bool collect_rt_info_vars = false;
+bool collect_rt_info_vars = true;
 
 // -- configuration end
 
@@ -178,6 +178,9 @@ void custom_init_prog(char *name, Bit16u relocate, Bit16u init_cs, Bit16u init_i
 // Custom exit function for DOSBox programs.
 void custom_exit_prog(Bit8u exitcode)
 {
+	// Dump shadow memory.
+	m2c::shadow_memory.dump();
+
 	// Check if it was a target binary.
 	if (!custom_runs) {
 		printf("It wasn't a target binary. Ignoring\n");
@@ -193,8 +196,6 @@ void custom_exit_prog(Bit8u exitcode)
 
 		init_runs--;
 	}
-	// Dump shadow memory.
-	m2c::shadow_memory.dump();
 }
 
 // Custom call function for handling translated function calls.
@@ -1395,6 +1396,9 @@ void ShadowMemory::collect_data(dd b, size_t size)
 // Function to dump the collected run-time information to a JSON file.
 void ShadowMemory::dump()
 {
+	if (!collect_rt_info || m_code.empty())
+	     return;
+
 	// Mark data addresses accessed multiple times as arrays.
 	for (auto &[key, value] : m_code) {
 		const Byte *b = value.get();
@@ -1421,6 +1425,10 @@ void ShadowMemory::dump()
 	fwrite(s.c_str(), s.size(), 1, f);
 	fclose(f);
 	printf("Saved json\n");
+
+        m_data.clear();
+        m_code.clear();
+        m_jumps.clear();
 	//       printf("%s\n",j.dump(3).c_str());
 }
 
