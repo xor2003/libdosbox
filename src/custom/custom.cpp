@@ -99,7 +99,7 @@ void masm2c_exit(unsigned char exit)
 {
 	init++;
 	printf("masm2c_exit Exiting\n");
-	// m2c::stackDump();
+	// m2c::stackDump();  // Debug stack dump (disabled)
 }
 
 // Is the game running?
@@ -159,11 +159,18 @@ void loguru_fatal(const loguru::Message &message)
 // Custom initialization function for DOSBox programs.
 void custom_init_prog(char *name, Bit16u relocate, Bit16u init_cs, Bit16u init_ip)
 {
-	// Register fatal error handler and exit handler.
+	/**
+	 * Program Initialization Hook
+	 *
+	 * Sets up the runtime analysis environment:
+	 * 1. Registers fatal error handler
+	 * 2. Initializes masm2c translation
+	 * 3. Starts shadow memory tracking
+	 */
 	static bool registered = false;
 	if (!registered) {
 		loguru::set_fatal_handler(loguru_fatal);
-		atexit(m2c::stackDumpZ);
+		atexit(m2c::stackDumpZ);  // Register exit handler for final report
 		registered = true;
 	}
 
@@ -178,7 +185,7 @@ void custom_init_prog(char *name, Bit16u relocate, Bit16u init_cs, Bit16u init_i
 // Custom exit function for DOSBox programs.
 void custom_exit_prog(Bit8u exitcode)
 {
-	// Dump shadow memory.
+	// Dump shadow memory (final analysis report)
 	m2c::shadow_memory.dump();
 
 	// Check if it was a target binary.
@@ -201,6 +208,14 @@ void custom_exit_prog(Bit8u exitcode)
 // Custom call function for handling translated function calls.
 int custom_callf(Bitu CS, Bitu IP)
 {
+	/**
+	 * Custom CALLF Handler
+	 *
+	 * Intercepts function calls to:
+	 * 1. Track call depth via shadow stack
+	 * 2. Enable runtime analysis
+	 * 3. Dispatch to translated functions
+	 */
 	// Check if it's a target binary and if initialization is complete.
 	if (!custom_runs)
 		return 0;
@@ -222,12 +237,19 @@ int custom_callf(Bitu CS, Bitu IP)
 // Custom exit function for DOSBox sections.
 static void custom_exit(Section *sec)
 {
-	custom_exit_prog(0);
+	custom_exit_prog(0);  // Cleanup on section exit
 }
 
 // Custom initialization function for DOSBox sections.
 void custom_init(Section *sec)
 {
+	/**
+	 * Custom Initialization
+	 *
+	 * Sets up:
+	 * 1. Exit handler
+	 * 2. Debugging hotkeys
+	 */
 	// Add the custom exit function.
 	sec->AddDestroyFunction(&custom_exit);
 
@@ -235,9 +257,10 @@ void custom_init(Section *sec)
 	fprintf(stderr, "Masm2c/DOSBOX lib, build date %s\n", __DATE__);
 
 	// Unused variable.
-	X86_REGREF 
+	X86_REGREF
         m2c::_STATE *_state = 0;
 
+	// Register dump hotkey
 	MAPPER_AddHandler(m2c::DumpExe1, SDL_SCANCODE_F2, PRIMARY_MOD, "dumpexe1",
 	                  "Dumpexe1");
 	//MAPPER_AddHandler(DumpExe2, SDL_SCANCODE_F3, PRIMARY_MOD, "dumpexe1",
@@ -247,7 +270,15 @@ void custom_init(Section *sec)
 // Custom initialization function for the entry point.
 void custom_init_entrypoint(char *name, Bit16u loadseg)
 {
-	m2c::dumpexe_start_hook(loadseg);
+	/**
+	 * Entry Point Initialization
+	 *
+	 * Called when a program starts execution to:
+	 * 1. Setup translation entry point
+	 * 2. Initialize shadow stack
+	 * 3. Start instruction tracing
+	 */
+	m2c::dumpexe_start_hook(loadseg);  // Start execution hook
 
 	// Check if it's a target binary and if initialization is complete.
 	if (!custom_runs)
@@ -698,6 +729,13 @@ size_t inst_size(db *b)
 // Function to process self-modifying instructions.
 void process_self_mod(dw seg, dd ip, size_t size)
 {
+	/**
+	 * Self-Modifying Code Handler
+	 *
+	 * Detects and logs code modifications at runtime
+	 * - Compares old vs new instructions
+	 * - Records modification in shadow memory
+	 */
 	// Print debug information about the self-modified instruction.
 	printf("~self-modified instruction at %x:%x\n", seg, ip);
 	::print_instruction_direct(seg, ip);
@@ -1306,6 +1344,12 @@ int log_debug(const char *format, ...)
 using json = nlohmann::json;
 void ShadowMemory::collect_segs()
 {
+	/**
+	 * Segment Register Collector
+	 *
+	 * Tracks segment register usage for each instruction
+	 * - Builds code execution profile
+	 */
 	// Reference the CPU registers.
 	X86_REGREF
 
