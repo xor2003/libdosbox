@@ -26,6 +26,13 @@ extern int custom_runs;
 #endif
 
 namespace m2c {
+enum class FlowKind : uint8_t {
+	Jump = 0,
+	Call = 1,
+	Ret = 2,
+	Jcc = 3,
+	Other = 4,
+};
 
 extern std::string exename;
 
@@ -108,6 +115,10 @@ struct _STATE;
  struct Data: public Byte
  {
    std::unordered_set<size_t> sizes;
+   std::unordered_set<size_t> read_sizes;
+   std::unordered_set<size_t> write_sizes;
+   size_t read_count = 0;
+   size_t write_count = 0;
    bool m_array = false;
 //   std::unordered_set<dd> referedcsip;
 
@@ -120,6 +131,9 @@ struct _STATE;
    std::array<std::unordered_set<dw>, 6> m_segs; // all segs values faced for current instruction
    bool m_video = false;
    std::unordered_set<dd> accessingdata;
+   size_t exec_count = 0;
+   std::unordered_map<dd, size_t> edge_to_count;
+   std::unordered_map<dd, uint32_t> edge_to_kind_mask;
 
    bool m_selfmodified = false;
    std::unordered_set<std::string> m_selfvariants;
@@ -138,9 +152,9 @@ struct _STATE;
 
    public:
    void collect_segs();
-   void collect_data(dd b, size_t s);
+   void collect_data(dd b, size_t s, bool is_write = false);
    void collect_selfmod(dw seg, dd ip, size_t modsize, size_t size, const char * oldins, const char * newins);
-   void collect_cross_jumps(dw target_cs, dd target_ip);
+   void collect_cross_jumps(dw target_cs, dd target_ip, FlowKind kind = FlowKind::Other);
    void dump();
    friend void to_json(nlohmann::json& nlohmann_json_j, const ShadowMemory& nlohmann_json_t);
    

@@ -1373,6 +1373,7 @@ void ShadowMemory::collect_segs()
 		if (m_code.find(target) == m_code.end())
 			m_code[target] = std::make_shared<Code>();
 		Code &c(*static_cast<Code *>(m_code.find(target)->second.get()));
+		++c.exec_count;
 		c.m_segs[(size_t)Byte::SegNames::cs].insert(cs);
 		c.m_segs[(size_t)Byte::SegNames::es].insert(es);
 		c.m_segs[(size_t)Byte::SegNames::ss].insert(ss);
@@ -1409,20 +1410,29 @@ void ShadowMemory::collect_selfmod(dw seg,
 }
 
 // Function to collect information about cross-segment jumps.
-void ShadowMemory::collect_cross_jumps(dw newcs, dd newip)
+void ShadowMemory::collect_cross_jumps(dw newcs, dd newip, FlowKind kind)
 {
 	// Reference the CPU registers.
 	X86_REGREF
 
 	// Collect jump targets within a specific code segment range.
 	if (newcs >= 0x192 && newcs < 0xa000) {
-		dd target = (newcs << 4) + newip;
-		m_jumps.insert(target);
+		const dd src = (cs << 4) + eip;
+		const dd dst = (newcs << 4) + newip;
+		m_jumps.insert(dst);
+		if (cs >= 0x192 && cs < 0xa000) {
+			if (m_code.find(src) == m_code.end()) {
+				m_code[src] = std::make_shared<Code>();
+			}
+			Code &c(*static_cast<Code *>(m_code.find(src)->second.get()));
+			++c.edge_to_count[dst];
+			c.edge_to_kind_mask[dst] |= (1u << static_cast<uint8_t>(kind));
+		}
 	}
 }
 
 // Function to collect information about data accesses.
-void ShadowMemory::collect_data(dd b, size_t size)
+void ShadowMemory::collect_data(dd b, size_t size, bool is_write)
 {
 	// Reference the CPU registers.
 	X86_REGREF
@@ -1434,6 +1444,13 @@ void ShadowMemory::collect_data(dd b, size_t size)
 			m_data[target] = std::make_shared<Data>();
 		Data &d(*static_cast<Data *>(m_data.find(target)->second.get()));
 		d.sizes.insert(size);
+		if (is_write) {
+			d.write_sizes.insert(size);
+			++d.write_count;
+		} else {
+			d.read_sizes.insert(size);
+			++d.read_count;
+		}
 	}
 
 	// Collect data access information for code addresses within a specific
@@ -1508,12 +1525,20 @@ void to_json(nlohmann::json &nlohmann_json_j, const Code &c)
 	//        if (c.m_modsize)
 	nlohmann_json_j["Modsize"] = c.m_modsize;
 	//        nlohmann_json_j["Accdat"] = c.accessingdata;
+	nlohmann_json_j["ExecCount"] = c.exec_count;
+	nlohmann_json_j["Accdat"] = c.accessingdata;
+	nlohmann_json_j["Edges"] = c.edge_to_count;
+	nlohmann_json_j["EdgeKinds"] = c.edge_to_kind_mask;
 }
 
 // JSON serialization function for the Data structure.
 void to_json(nlohmann::json &nlohmann_json_j, const Data &nlohmann_json_t)
 {
 	nlohmann_json_j["Sizes"] = nlohmann_json_t.sizes;
+	nlohmann_json_j["ReadSizes"] = nlohmann_json_t.read_sizes;
+	nlohmann_json_j["WriteSizes"] = nlohmann_json_t.write_sizes;
+	nlohmann_json_j["ReadCount"] = nlohmann_json_t.read_count;
+	nlohmann_json_j["WriteCount"] = nlohmann_json_t.write_count;
 	//	if (nlohmann_json_t.m_array)
 	nlohmann_json_j["Array"] = nlohmann_json_t.m_array;
 }
