@@ -115,6 +115,16 @@ CollectOnlyProfile k_collect_only_profile;
 
 const RuntimeProfileStrategy *g_active_profile = &k_analysis_profile;
 
+void print_runtime_modes()
+{
+	printf("custom status: profile=%s compare=%d trace=%d trace_stdout=%d collect_rt=%d collect_vars=%d complex_selfmod=%d\n",
+	       g_active_profile->name(), compare_mode ? 1 : 0,
+	       trace_instructions ? 1 : 0,
+	       trace_instructions_to_stdout ? 1 : 0,
+	       collect_rt_info ? 1 : 0, collect_rt_info_vars ? 1 : 0,
+	       complex_self_modifications ? 1 : 0);
+}
+
 const RuntimeProfileStrategy *profile_by_id(RuntimeProfile p)
 {
 	switch (p) {
@@ -131,6 +141,7 @@ void set_runtime_profile(RuntimeProfile p)
 	g_active_profile = profile_by_id(p);
 	g_active_profile->apply();
 	printf("custom profile: %s\n", g_active_profile->name());
+	print_runtime_modes();
 }
 
 void cycle_runtime_profile(bool pressed)
@@ -166,6 +177,7 @@ void toggle_compare_mode(bool pressed)
 		return;
 	compare_mode = !compare_mode;
 	printf("custom option: compare_mode=%d\n", compare_mode ? 1 : 0);
+	print_runtime_modes();
 }
 
 void toggle_trace_mode(bool pressed)
@@ -175,6 +187,7 @@ void toggle_trace_mode(bool pressed)
 	trace_instructions = !trace_instructions;
 	printf("custom option: trace_instructions=%d\n",
 	       trace_instructions ? 1 : 0);
+	print_runtime_modes();
 }
 
 void toggle_trace_stdout_mode(bool pressed)
@@ -184,6 +197,7 @@ void toggle_trace_stdout_mode(bool pressed)
 	trace_instructions_to_stdout = !trace_instructions_to_stdout;
 	printf("custom option: trace_instructions_to_stdout=%d\n",
 	       trace_instructions_to_stdout ? 1 : 0);
+	print_runtime_modes();
 }
 
 void toggle_collect_rt_info_mode(bool pressed)
@@ -192,6 +206,7 @@ void toggle_collect_rt_info_mode(bool pressed)
 		return;
 	collect_rt_info = !collect_rt_info;
 	printf("custom option: collect_rt_info=%d\n", collect_rt_info ? 1 : 0);
+	print_runtime_modes();
 }
 
 void toggle_collect_rt_info_vars_mode(bool pressed)
@@ -201,6 +216,7 @@ void toggle_collect_rt_info_vars_mode(bool pressed)
 	collect_rt_info_vars = !collect_rt_info_vars;
 	printf("custom option: collect_rt_info_vars=%d\n",
 	       collect_rt_info_vars ? 1 : 0);
+	print_runtime_modes();
 }
 
 void toggle_complex_self_modifications_mode(bool pressed)
@@ -210,6 +226,14 @@ void toggle_complex_self_modifications_mode(bool pressed)
 	complex_self_modifications = !complex_self_modifications;
 	printf("custom option: complex_self_modifications=%d\n",
 	       complex_self_modifications ? 1 : 0);
+	print_runtime_modes();
+}
+
+void print_runtime_modes_hotkey(bool pressed)
+{
+	if (!pressed)
+		return;
+	print_runtime_modes();
 }
 } // namespace
 
@@ -473,6 +497,8 @@ void custom_init(Section *sec)
 	MAPPER_AddHandler(toggle_complex_self_modifications_mode,
 	                  SDL_SCANCODE_6, PRIMARY_MOD, "custsm_t",
 	                  "Toggle complex selfmod");
+	MAPPER_AddHandler(print_runtime_modes_hotkey, SDL_SCANCODE_0,
+	                  PRIMARY_MOD, "custstat", "Custom status");
 	set_runtime_profile(RuntimeProfile::Analysis);
 	// MAPPER_AddHandler(DumpExe2, SDL_SCANCODE_F3, PRIMARY_MOD, "dumpexe1",
 	//                   "Dumpexe1");
