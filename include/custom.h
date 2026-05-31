@@ -5,19 +5,25 @@
 #include <stack>
 #include <vector>
 
-typedef Bit16u dw;
-typedef Bit32u dd;
+typedef uint16_t dw;
+typedef uint32_t dd;
 
 extern bool collect_rt_info;
 extern bool collect_rt_info_vars;
 extern bool compare_mode;
-extern Bit32u last_ip;
+extern uint32_t last_ip;
 extern int custom_runs;
 
 #include <unordered_set>
 #include <unordered_map>
 #include <memory>
+#if __has_include(<json.hpp>)
 #include <json.hpp>
+#elif __has_include(<nlohmann/json.hpp>)
+#include <nlohmann/json.hpp>
+#else
+#error "Missing nlohmann JSON header (json.hpp or nlohmann/json.hpp)"
+#endif
 
 namespace m2c {
 
@@ -153,21 +159,21 @@ extern volatile bool from_interpreter;
 extern volatile bool doing_single_step;
 extern volatile bool compare_jump;
 extern Bitu old_cycles; // backup remaining cycles
-extern std::stack<Bit32u> return_point; // where interpreter should return cntrol to m2c
-extern void print_instruction(Bit16u newcs, Bit32u newip);
+extern std::stack<uint32_t> return_point; // where interpreter should return cntrol to m2c
+extern void print_instruction(uint16_t newcs, uint32_t newip);
 void init_get_fname(char *executable_name_out, char *source_path);
 
 #if DOSBOX_CUSTOM
 // old values of CS:IP (directly before the call), usable for diagnosis
-extern Bit16u custom_oldCS, custom_oldIP;
+extern uint16_t custom_oldCS, custom_oldIP;
 
 
 void custom_init(Section *sec);
 
 /* prototypes for Execution operations */
-void custom_init_prog(char *, Bit16u, Bit16u, Bit16u);
-void custom_exit_prog(Bit8u);
-void custom_init_entrypoint(char *, Bit16u);
+void custom_init_prog(char *, uint16_t, uint16_t, uint16_t);
+void custom_exit_prog(uint8_t);
+void custom_init_entrypoint(char *, uint16_t);
 
 /* prototypes for CPU operations */
 int custom_callf(Bitu, Bitu);
@@ -178,10 +184,10 @@ static inline void custom_init(Section *sec) { }
 
 /* prototypes for Execution operations */
 static inline void
-custom_init_prog(char *name, Bit16u relocate, Bit16u init_cs, Bit16u init_ip) { }
-static inline void custom_init_entrypoint(char *, Bit16u) { }
+custom_init_prog(char *name, uint16_t relocate, uint16_t init_cs, uint16_t init_ip) { }
+static inline void custom_init_entrypoint(char *, uint16_t) { }
 
-static inline void custom_exit_prog(Bit8u exitcode) { }
+static inline void custom_exit_prog(uint8_t exitcode) { }
 
 /* prototypes for CPU operations */
 static inline int custom_callf(Bitu seg, Bitu off) { return 0; }

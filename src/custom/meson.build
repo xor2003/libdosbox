@@ -8,7 +8,8 @@ libcustom_sources = files([
 
 libcustom = static_library('custom', libcustom_sources,
                         include_directories : incdir,
-                        dependencies : [ libloguru_dep
+                        dependencies : [ libloguru_dep,
+                                         sdl2_dep
                                        ])
 
 libcustom_dep = declare_dependency(link_with : libcustom)

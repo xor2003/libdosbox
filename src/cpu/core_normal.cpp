@@ -1,4 +1,5 @@
 /*
+ *  Copyright (C) 2024-2024  The DOSBox Staging Team
  *  Copyright (C) 2002-2021  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -15,19 +16,23 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
-
-#include <stdio.h>
-
 #include "dosbox.h"
-#include "mem.h"
-#include "cpu.h"
-#include "lazyflags.h"
-#include "inout.h"
+
+// Needed for std::isnan in simde
+#include <cmath>
+
 #include "callback.h"
-#include "pic.h"
+#include "cpu.h"
 #include "fpu.h"
+#include "inout.h"
+#include "lazyflags.h"
+#include "mem.h"
+#include "mmx.h"
 #include "paging.h"
-#include "custom.h"
+#include "pic.h"
+#include "tracy.h"
+
+#include "simde/x86/mmx.h"
 
 #if C_DEBUG
 #include "debug.h"
@@ -37,17 +42,21 @@
 #define LoadMb(off) mem_readb(off)
 #define LoadMw(off) mem_readw(off)
 #define LoadMd(off) mem_readd(off)
+#define LoadMq(off) mem_readq(off)
 #define SaveMb(off,val)	mem_writeb(off,val)
 #define SaveMw(off,val)	mem_writew(off,val)
 #define SaveMd(off,val)	mem_writed(off,val)
+#define SaveMq(off,val) mem_writeq(off,val)
 #else 
 #include "paging.h"
 #define LoadMb(off) mem_readb_inline(off)
 #define LoadMw(off) mem_readw_inline(off)
 #define LoadMd(off) mem_readd_inline(off)
+#define LoadMq(off) mem_readq_inline(off)
 #define SaveMb(off,val)	mem_writeb_inline(off,val)
 #define SaveMw(off,val)	mem_writew_inline(off,val)
 #define SaveMd(off,val)	mem_writed_inline(off,val)
+#define SaveMq(off,val) mem_writeq_inline(off,val)
 #endif
 
 extern Bitu cycle_count;
@@ -90,7 +99,7 @@ extern Bitu cycle_count;
 
 typedef PhysPt (*GetEAHandler)(void);
 
-static const Bit32u AddrMaskTable[2]={0x0000ffff,0xffffffff};
+static const uint32_t AddrMaskTable[2]={0x0000ffff,0xffffffff};
 
 static struct {
 	Bitu opcode_index;
@@ -110,19 +119,19 @@ static struct {
 #define BaseDS		core.base_ds
 #define BaseSS		core.base_ss
 
-static inline Bit8u Fetchb() {
-	Bit8u temp=LoadMb(core.cseip);
+static inline uint8_t Fetchb() {
+	uint8_t temp=LoadMb(core.cseip);
 	core.cseip+=1;
 	return temp;
 }
 
-static inline Bit16u Fetchw() {
-	Bit16u temp=LoadMw(core.cseip);
+static inline uint16_t Fetchw() {
+	uint16_t temp=LoadMw(core.cseip);
 	core.cseip+=2;
 	return temp;
 }
-static inline Bit32u Fetchd() {
-	Bit32u temp=LoadMd(core.cseip);
+static inline uint32_t Fetchd() {
+	uint32_t temp=LoadMd(core.cseip);
 	core.cseip+=4;
 	return temp;
 }
@@ -139,59 +148,11 @@ static inline Bit32u Fetchd() {
 
 #define EALookupTable (core.ea_table)
 
-extern Bitu DasmI386(char* buffer, PhysPt pc, Bitu cur_ip, bool bit32);
-
-namespace m2c {
-extern void log_regs_dbx(const char * file,int line, const char * instr, const CPU_Regs& r, const Segments& s);
-    extern int log_debug(const char *format, ...);
-
-}
-
-void print_instruction(Bit16u newcs, Bit32u newip)
+Bits CPU_Core_Normal_Run() noexcept
 {
-  char dline[120];
-//  static std::unordered_set<std::string> instr_names;
-  DasmI386(dline,(newcs<<4)+newip,newip,false);
-//  const char * instr = instr_names.insert(dline).first->c_str();
-  m2c::log_regs_dbx("",-1, dline ,cpu_regs,Segs);
-}
-
-void print_instruction_direct(Bit16u newcs, Bit32u newip)
-{
-  char dline[120];
-//  static std::unordered_set<std::string> instr_names;
-  DasmI386(dline,(newcs<<4)+newip,newip,false);
-//  const char * instr = instr_names.insert(dline).first->c_str();
-  puts(dline);puts("\n");
-}
-
-extern int custom_runs;
-
-Bits CPU_Core_Normal_Run(void) {
-	if (compare_mode && last_ip != 0xffff && last_ip != cpu_regs.ip.dword[0] && custom_runs) {
-		m2c::log_debug("IP changed dbx: %x now: %x\n", last_ip, cpu_regs.ip.dword[0]);
-		exit(1);
-	}
-
+	ZoneScoped;
 	while (CPU_Cycles-->0) {
 		LOADIP;
-
-		if (!return_point.empty() && return_point.top()==(SegBase(cs)<<12)+cpu_regs.ip.word[0])
-		{
-                  SAVEIP;
-		  FillFlags();
-		last_ip = cpu_regs.ip.dword[0];
-		  return CBRET_NONE;
-                } // stop interpretation
-
-if (trace_instructions)
-{
-  print_instruction(SegBase(cs)>>4,cpu_regs.ip.dword[0]);
-}
-
-                if (collect_rt_info) m2c::shadow_memory.collect_segs();
-//    compare_jump = false;
-
 		core.opcode_index=cpu.code.big*0x200;
 		core.prefixes=cpu.code.big;
 		core.ea_table=&EATable[cpu.code.big*256];
@@ -234,16 +195,15 @@ restart_opcode:
 		SAVEIP;
 	}
 	FillFlags();
-	last_ip = cpu_regs.ip.dword[0];
 	return CBRET_NONE;
 decode_end:
 	SAVEIP;
 	FillFlags();
-	last_ip = cpu_regs.ip.dword[0];
 	return CBRET_NONE;
 }
 
-Bits CPU_Core_Normal_Trap_Run(void) {
+Bits CPU_Core_Normal_Trap_Run() noexcept
+{
 	Bits oldCycles = CPU_Cycles;
 	CPU_Cycles = 1;
 	cpu.trap_skip = false;
@@ -252,10 +212,9 @@ Bits CPU_Core_Normal_Trap_Run(void) {
 	if (!cpu.trap_skip) CPU_DebugException(DBINT_STEP,reg_eip);
 	CPU_Cycles = oldCycles-1;
 	cpudecoder = &CPU_Core_Normal_Run;
+
 	return ret;
 }
-
-
 
 void CPU_Core_Normal_Init(void) {
 

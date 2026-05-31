@@ -2592,8 +2592,8 @@ extern bool defered_irqs;
 } // namespace m2c
 
 #if DOSBOX_CUSTOM
-extern void print_instruction(Bit16u newcs, Bit32u newip);
-extern void print_instruction_direct(Bit16u newcs, Bit32u newip);
+extern void print_instruction(uint16_t newcs, uint32_t newip);
+extern void print_instruction_direct(uint16_t newcs, uint32_t newip);
 #endif
 
 #endif

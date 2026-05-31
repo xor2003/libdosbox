@@ -50,7 +50,7 @@ extern void load_drivers();
 static const size_t COMPARE_SIZE = 0xf0000;
 
 // Global variable to track the last executed instruction pointer.
-Bit32u last_ip = 0xffff;
+uint32_t last_ip = 0xffff;
 
 // Function pointer to the DOSBox CPU loop.
 extern Bitu Normal_Loop(void);
@@ -61,7 +61,7 @@ int custom_runs = 0;
 // Variable to store the old CPU cycle count.
 Bitu old_cycles;
 // Stack to store return points for function calls.
-std::stack<Bit32u> return_point;
+std::stack<uint32_t> return_point;
 
 // Flags to control deferred custom calls and execution context.
 volatile bool defered_custom_call = false;
@@ -77,7 +77,7 @@ static int init_runs = 0;
 static int init = 0;
 
 // Function to initialize the entry point for translated code.
-void init_entrypoint(Bit16u relocate);
+void init_entrypoint(uint16_t relocate);
 
 // Function to dispatch calls to translated functions.
 extern bool __dispatch_call(m2c::_offsets __disp, struct m2c::_STATE *_state);
@@ -169,7 +169,7 @@ void loguru_fatal(const loguru::Message &message)
 }
 
 // Custom initialization function for DOSBox programs.
-void custom_init_prog(char *name, Bit16u relocate, Bit16u init_cs, Bit16u init_ip)
+void custom_init_prog(char *name, uint16_t relocate, uint16_t init_cs, uint16_t init_ip)
 {
 	/**
 	 * Program Initialization Hook
@@ -195,7 +195,7 @@ void custom_init_prog(char *name, Bit16u relocate, Bit16u init_cs, Bit16u init_i
 }
 
 // Custom exit function for DOSBox programs.
-void custom_exit_prog(Bit8u exitcode)
+void custom_exit_prog(uint8_t exitcode)
 {
 	// Dump shadow memory (final analysis report)
 	m2c::shadow_memory.dump();
@@ -281,7 +281,7 @@ void custom_init(Section *sec)
 }
 
 // Custom initialization function for the entry point.
-void custom_init_entrypoint(char *name, Bit16u loadseg)
+void custom_init_entrypoint(char *name, uint16_t loadseg)
 {
 	(void)name;
 	/**
@@ -560,10 +560,10 @@ void log_regs_dbx_direct(size_t counter_,
 	/*
 	enum SegNames { es=0,cs=1,ss=2,ds=3,fs=4,gs=5};
 	struct Segments {
-	        Bit16u val[8];
+	        uint16_t val[8];
 	};
 	union GenReg32 {
-	        Bit32u dword[1];
+	        uint32_t dword[1];
 	};
 	struct CPU_Regs {
 	        GenReg32 regs[8],ip;
@@ -1316,10 +1316,10 @@ void interpret_unknown_callf(dw newcs, dd newip, db source)
 		//  log_debug("start\n");
 		Normal_Loop();
 		//  log_debug("stop\n");
-	} while (return_point.top() != static_cast<Bit32u>((cs << 16) + ip));
+	} while (return_point.top() != static_cast<uint32_t>((cs << 16) + ip));
 
 	// Handle mismatched return points.
-	if (return_point.top() != static_cast<Bit32u>((cs << 16) + ip)) {
+	if (return_point.top() != static_cast<uint32_t>((cs << 16) + ip)) {
 		log_error("Error cs:ip != return_point %x\n", return_point.top());
 	}
 	/*
@@ -1548,7 +1548,7 @@ void to_json(nlohmann::json &nlohmann_json_j, const ShadowMemory &nlohmann_json_
 } // namespace m2c
 
 // Function to initialize the entry point for translated code.
-void init_entrypoint(Bit16u relocate)
+void init_entrypoint(uint16_t relocate)
 {
 	(void)relocate;
 	// Reference the CPU registers.
