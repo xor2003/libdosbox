@@ -216,7 +216,7 @@
 		reg_di=Pop_16();break;
 	CASE_W(0x60)												/* PUSHA */
 		{
-			uint16_t old_sp=reg_sp;
+			Bit16u old_sp=reg_sp;
 			Push_16(reg_ax);Push_16(reg_cx);Push_16(reg_dx);Push_16(reg_bx);
 			Push_16(old_sp);Push_16(reg_bp);Push_16(reg_si);Push_16(reg_di);
 		}
@@ -227,12 +227,11 @@
 		break;
 	CASE_W(0x62)												/* BOUND */
 		{
-			GetRMrw;
-			if (rm >= 0xc0) goto illegal_opcode;
-			GetEAa;
-			const auto bound_min=LoadMws(eaa);
-			const auto bound_max=LoadMws(eaa+2);
-			if ( (((int16_t)*rmrw) < bound_min) || (((int16_t)*rmrw) > bound_max) ) {
+			Bit16s bound_min, bound_max;
+			GetRMrw;GetEAa;
+			bound_min=LoadMw(eaa);
+			bound_max=LoadMw(eaa+2);
+			if ( (((Bit16s)*rmrw) < bound_min) || (((Bit16s)*rmrw) > bound_max) ) {
 				EXCEPTION(5);
 			}
 		}
@@ -244,11 +243,11 @@
 			if (rm >= 0xc0 ) {
 				GetEArw;Bitu new_sel=*earw;
 				CPU_ARPL(new_sel,*rmrw);
-				*earw=(uint16_t)new_sel;
+				*earw=(Bit16u)new_sel;
 			} else {
 				GetEAa;Bitu new_sel=LoadMw(eaa);
 				CPU_ARPL(new_sel,*rmrw);
-				SaveMw(eaa,(uint16_t)new_sel);
+				SaveMw(eaa,(Bit16u)new_sel);
 			}
 		}
 		break;
@@ -321,7 +320,7 @@
 		{
 			GetRM;Bitu which=(rm>>3)&7;
 			if (rm>= 0xc0) {
-				GetEArb;uint8_t ib=Fetchb();
+				GetEArb;Bit8u ib=Fetchb();
 				switch (which) {
 				case 0x00:ADDB(*earb,ib,LoadRb,SaveRb);break;
 				case 0x01: ORB(*earb,ib,LoadRb,SaveRb);break;
@@ -333,7 +332,7 @@
 				case 0x07:CMPB(*earb,ib,LoadRb,SaveRb);break;
 				}
 			} else {
-				GetEAa;uint8_t ib=Fetchb();
+				GetEAa;Bit8u ib=Fetchb();
 				switch (which) {
 				case 0x00:ADDB(eaa,ib,LoadMb,SaveMb);break;
 				case 0x01: ORB(eaa,ib,LoadMb,SaveMb);break;
@@ -351,7 +350,7 @@
 		{
 			GetRM;Bitu which=(rm>>3)&7;
 			if (rm>= 0xc0) {
-				GetEArw;uint16_t iw=Fetchw();
+				GetEArw;Bit16u iw=Fetchw();
 				switch (which) {
 				case 0x00:ADDW(*earw,iw,LoadRw,SaveRw);break;
 				case 0x01: ORW(*earw,iw,LoadRw,SaveRw);break;
@@ -363,7 +362,7 @@
 				case 0x07:CMPW(*earw,iw,LoadRw,SaveRw);break;
 				}
 			} else {
-				GetEAa;uint16_t iw=Fetchw();
+				GetEAa;Bit16u iw=Fetchw();
 				switch (which) {
 				case 0x00:ADDW(eaa,iw,LoadMw,SaveMw);break;
 				case 0x01: ORW(eaa,iw,LoadMw,SaveMw);break;
@@ -381,7 +380,7 @@
 		{
 			GetRM;Bitu which=(rm>>3)&7;
 			if (rm>= 0xc0) {
-				GetEArw;uint16_t iw=(int16_t)Fetchbs();
+				GetEArw;Bit16u iw=(Bit16s)Fetchbs();
 				switch (which) {
 				case 0x00:ADDW(*earw,iw,LoadRw,SaveRw);break;
 				case 0x01: ORW(*earw,iw,LoadRw,SaveRw);break;
@@ -393,7 +392,7 @@
 				case 0x07:CMPW(*earw,iw,LoadRw,SaveRw);break;
 				}
 			} else {
-				GetEAa;uint16_t iw=(int16_t)Fetchbs();
+				GetEAa;Bit16u iw=(Bit16s)Fetchbs();
 				switch (which) {
 				case 0x00:ADDW(eaa,iw,LoadMw,SaveMw);break;
 				case 0x01: ORW(eaa,iw,LoadMw,SaveMw);break;
@@ -415,14 +414,14 @@
 		break;
 	CASE_B(0x86)												/* XCHG Eb,Gb */
 		{	
-			GetRMrb;uint8_t oldrmrb=*rmrb;
+			GetRMrb;Bit8u oldrmrb=*rmrb;
 			if (rm >= 0xc0 ) {GetEArb;*rmrb=*earb;*earb=oldrmrb;}
 			else {GetEAa;*rmrb=LoadMb(eaa);SaveMb(eaa,oldrmrb);}
 			break;
 		}
 	CASE_W(0x87)												/* XCHG Ew,Gw */
 		{	
-			GetRMrw;uint16_t oldrmrw=*rmrw;
+			GetRMrw;Bit16u oldrmrw=*rmrw;
 			if (rm >= 0xc0 ) {GetEArw;*rmrw=*earw;*earw=oldrmrw;}
 			else {GetEAa;*rmrw=LoadMw(eaa);SaveMw(eaa,oldrmrw);}
 			break;
@@ -433,24 +432,19 @@
 			if (rm >= 0xc0 ) {GetEArb;*earb=*rmrb;}
 			else {
 				if (cpu.pmode) {
-			                if ((rm == 0x05) && (!cpu.code.big)) {
-				                Descriptor desc;
-				                cpu.gdt.GetDescriptor(SegValue(core.base_val_ds),
-				                                      desc);
-				                if ((desc.Type() == DESC_CODE_R_NC_A) ||
-				                    (desc.Type() == DESC_CODE_R_NC_NA)) {
-					                CPU_Exception(EXCEPTION_GP,
-					                              SegValue(core.base_val_ds) &
-					                                      0xfffc);
-					                continue;
-				                }
-			                }
-		                }
-		                GetEAa;
-		                SaveMb(eaa, *rmrb);
-	                }
-	                break;
-                }
+					if (GCC_UNLIKELY((rm==0x05) && (!cpu.code.big))) {
+						Descriptor desc;
+						cpu.gdt.GetDescriptor(SegValue(core.base_val_ds),desc);
+						if ((desc.Type()==DESC_CODE_R_NC_A) || (desc.Type()==DESC_CODE_R_NC_NA)) {
+							CPU_Exception(EXCEPTION_GP,SegValue(core.base_val_ds) & 0xfffc);
+							continue;
+						}
+					}
+				}
+				GetEAa;SaveMb(eaa,*rmrb);
+			}
+			break;
+		}
 	CASE_W(0x89)												/* MOV Ew,Gw */
 		{	
 			GetRMrw;
@@ -474,7 +468,7 @@
 		}
 	CASE_W(0x8c)												/* Mov Ew,Sw */
 		{
-			GetRM;uint16_t val;Bitu which=(rm>>3)&7;
+			GetRM;Bit16u val;Bitu which=(rm>>3)&7;
 			switch (which) {
 			case 0x00:					/* MOV Ew,ES */
 				val=SegValue(es);break;
@@ -503,15 +497,15 @@
 			//Little hack to always use segprefixed version
 			BaseDS=BaseSS=0;
 			if (TEST_PREFIX_ADDR) {
-				*rmrw=(uint16_t)(*EATable[256+rm])();
+				*rmrw=(Bit16u)(*EATable[256+rm])();
 			} else {
-				*rmrw=(uint16_t)(*EATable[rm])();
+				*rmrw=(Bit16u)(*EATable[rm])();
 			}
 			break;
 		}
 	CASE_B(0x8e)												/* MOV Sw,Ew */
 		{
-			GetRM;uint16_t val;Bitu which=(rm>>3)&7;
+			GetRM;Bit16u val;Bitu which=(rm>>3)&7;
 			if (rm >= 0xc0 ) {GetEArw;val=*earw;}
 			else {GetEAa;val=LoadMw(eaa);}
 			switch (which) {
@@ -531,7 +525,7 @@
 		}							
 	CASE_W(0x8f)												/* POP Ew */
 		{
-			uint16_t val=Pop_16();
+			Bit16u val=Pop_16();
 			GetRM;
 			if (rm >= 0xc0 ) {GetEArw;*earw=val;}
 			else {GetEAa;SaveMw(eaa,val);}
@@ -540,35 +534,35 @@
 	CASE_B(0x90)												/* NOP */
 		break;
 	CASE_W(0x91)												/* XCHG CX,AX */
-		{ uint16_t temp=reg_ax;reg_ax=reg_cx;reg_cx=temp; }
+		{ Bit16u temp=reg_ax;reg_ax=reg_cx;reg_cx=temp; }
 		break;
 	CASE_W(0x92)												/* XCHG DX,AX */
-		{ uint16_t temp=reg_ax;reg_ax=reg_dx;reg_dx=temp; }
+		{ Bit16u temp=reg_ax;reg_ax=reg_dx;reg_dx=temp; }
 		break;
 	CASE_W(0x93)												/* XCHG BX,AX */
-		{ uint16_t temp=reg_ax;reg_ax=reg_bx;reg_bx=temp; }
+		{ Bit16u temp=reg_ax;reg_ax=reg_bx;reg_bx=temp; }
 		break;
 	CASE_W(0x94)												/* XCHG SP,AX */
-		{ uint16_t temp=reg_ax;reg_ax=reg_sp;reg_sp=temp; }
+		{ Bit16u temp=reg_ax;reg_ax=reg_sp;reg_sp=temp; }
 		break;
 	CASE_W(0x95)												/* XCHG BP,AX */
-		{ uint16_t temp=reg_ax;reg_ax=reg_bp;reg_bp=temp; }
+		{ Bit16u temp=reg_ax;reg_ax=reg_bp;reg_bp=temp; }
 		break;
 	CASE_W(0x96)												/* XCHG SI,AX */
-		{ uint16_t temp=reg_ax;reg_ax=reg_si;reg_si=temp; }
+		{ Bit16u temp=reg_ax;reg_ax=reg_si;reg_si=temp; }
 		break;
 	CASE_W(0x97)												/* XCHG DI,AX */
-		{ uint16_t temp=reg_ax;reg_ax=reg_di;reg_di=temp; }
+		{ Bit16u temp=reg_ax;reg_ax=reg_di;reg_di=temp; }
 		break;
 	CASE_W(0x98)												/* CBW */
-		reg_ax=(int8_t)reg_al;break;
+		reg_ax=(Bit8s)reg_al;break;
 	CASE_W(0x99)												/* CWD */
 		if (reg_ax & 0x8000) reg_dx=0xffff;else reg_dx=0;
 		break;
 	CASE_W(0x9a)												/* CALL Ap */
 		{ 
 			FillFlags();
-			uint16_t newip=Fetchw();uint16_t newcs=Fetchw();
+			Bit16u newip=Fetchw();Bit16u newcs=Fetchw();
 			CPU_CALL(false,newcs,newip,GETIP);
 #if CPU_TRAP_CHECK
 			if (GETFLAG(TF)) {	
@@ -761,7 +755,7 @@
 		continue;
 	CASE_B(0xcd)												/* INT Ib */	
 		{
-			uint8_t num=Fetchb();
+			Bit8u num=Fetchb();
 #if C_DEBUG
 			FillFlags();
 			if (DEBUG_IntBreakpoint(num)) {
@@ -816,7 +810,7 @@
 		if (TEST_PREFIX_ADDR) {
 	                reg_al = LoadMb(BaseDS + (reg_ebx + reg_al));
                 } else {
-	                reg_al = LoadMb(BaseDS + (uint16_t)(reg_bx + reg_al));
+	                reg_al = LoadMb(BaseDS + (Bit16u)(reg_bx + reg_al));
                 }
                 break;
 #ifdef CPU_FPU
@@ -847,7 +841,7 @@
 	CASE_B(0xdf)												/* FPU ESC 7 */
 		{
 			LOG(LOG_CPU,LOG_NORMAL)("FPU used");
-			uint8_t rm=Fetchb();
+			Bit8u rm=Fetchb();
 			if (rm<0xc0) GetEAa;
 		}
 		break;
@@ -877,52 +871,52 @@
 		JumpCond16_b(!(reg_ecx & AddrMaskTable[core.prefixes& PREFIX_ADDR]));
 		break;
 	CASE_B(0xe4)												/* IN AL,Ib */
-		{
-			const auto port = Fetchb();
+		{	
+			Bitu port=Fetchb();
 			if (CPU_IO_Exception(port,1)) RUNEXCEPTION();
 			reg_al=IO_ReadB(port);
 			break;
 		}
 	CASE_W(0xe5)												/* IN AX,Ib */
-		{
-			const auto port = Fetchb();
+		{	
+			Bitu port=Fetchb();
 			if (CPU_IO_Exception(port,2)) RUNEXCEPTION();
 			reg_ax=IO_ReadW(port);
 			break;
 		}
 	CASE_B(0xe6)												/* OUT Ib,AL */
 		{
-			const auto port = Fetchb();
+			Bitu port=Fetchb();
 			if (CPU_IO_Exception(port,1)) RUNEXCEPTION();
 			IO_WriteB(port,reg_al);
 			break;
 		}		
 	CASE_W(0xe7)												/* OUT Ib,AX */
 		{
-			const auto port = Fetchb();
+			Bitu port=Fetchb();
 			if (CPU_IO_Exception(port,2)) RUNEXCEPTION();
 			IO_WriteW(port,reg_ax);
 			break;
 		}
 	CASE_W(0xe8)												/* CALL Jw */
 		{ 
-			uint16_t addip=Fetchws();
+			Bit16u addip=Fetchws();
 			SAVEIP;
 			Push_16(reg_eip);
-			reg_eip=(uint16_t)(reg_eip+addip);
+			reg_eip=(Bit16u)(reg_eip+addip);
 			continue;
 		}
 	CASE_W(0xe9)												/* JMP Jw */
 		{ 
-			uint16_t addip=Fetchws();
+			Bit16u addip=Fetchws();
 			SAVEIP;
-			reg_eip=(uint16_t)(reg_eip+addip);
+			reg_eip=(Bit16u)(reg_eip+addip);
 			continue;
 		}
 	CASE_W(0xea)												/* JMP Ap */
 		{ 
-			uint16_t newip=Fetchw();
-			uint16_t newcs=Fetchw();
+			Bit16u newip=Fetchw();
+			Bit16u newcs=Fetchw();
 			FillFlags();
 			CPU_JMP(false,newcs,newip,GETIP);
 #if CPU_TRAP_CHECK
@@ -935,9 +929,9 @@
 		}
 	CASE_W(0xeb)												/* JMP Jb */
 		{ 
-			int16_t addip=Fetchbs();
+			Bit16s addip=Fetchbs();
 			SAVEIP;
-			reg_eip=(uint16_t)(reg_eip+addip);
+			reg_eip=(Bit16u)(reg_eip+addip);
 			continue;
 		}
 	CASE_B(0xec)												/* IN AL,DX */
@@ -975,6 +969,7 @@
 		if (cpu.pmode && cpu.cpl) EXCEPTION(EXCEPTION_GP);
 		FillFlags();
 		CPU_HLT(GETIP);
+	last_ip = cpu_regs.ip.dword[0];
 		return CBRET_NONE;		//Needs to return for hlt cpu core
 	CASE_B(0xf5)												/* CMC */
 		FillFlags();
@@ -1107,6 +1102,7 @@
 				{
 					Bitu cb=Fetchw();
 					FillFlags();SAVEIP;
+	last_ip = cpu_regs.ip.dword[0];
 					return cb;
 				}
 			default:
@@ -1128,15 +1124,17 @@
 			case 0x02:										/* CALL Ev */
 				if (rm >= 0xc0 ) {GetEArw;reg_eip=*earw;}
 				else {GetEAa;reg_eip=LoadMw(eaa);}
+if (collect_rt_info) m2c::shadow_memory.collect_cross_jumps(Segs.val[cs],reg_eip);
 				Push_16(GETIP);
 				continue;
 			case 0x03:										/* CALL Ep */
 				{
 					if (rm >= 0xc0) goto illegal_opcode;
 					GetEAa;
-					uint16_t newip=LoadMw(eaa);
-					uint16_t newcs=LoadMw(eaa+2);
+					Bit16u newip=LoadMw(eaa);
+					Bit16u newcs=LoadMw(eaa+2);
 					FillFlags();
+if (collect_rt_info) m2c::shadow_memory.collect_cross_jumps(newcs,newip);
 					CPU_CALL(false,newcs,newip,GETIP);
 #if CPU_TRAP_CHECK
 					if (GETFLAG(TF)) {	
@@ -1150,14 +1148,16 @@
 			case 0x04:										/* JMP Ev */	
 				if (rm >= 0xc0 ) {GetEArw;reg_eip=*earw;}
 				else {GetEAa;reg_eip=LoadMw(eaa);}
+if (collect_rt_info) m2c::shadow_memory.collect_cross_jumps(Segs.val[cs],reg_eip);
 				continue;
 			case 0x05:										/* JMP Ep */	
 				{
 					if (rm >= 0xc0) goto illegal_opcode;
 					GetEAa;
-					uint16_t newip=LoadMw(eaa);
-					uint16_t newcs=LoadMw(eaa+2);
+					Bit16u newip=LoadMw(eaa);
+					Bit16u newcs=LoadMw(eaa+2);
 					FillFlags();
+if (collect_rt_info) m2c::shadow_memory.collect_cross_jumps(newcs,newip);
 					CPU_JMP(false,newcs,newip,GETIP);
 #if CPU_TRAP_CHECK
 					if (GETFLAG(TF)) {	
