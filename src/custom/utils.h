@@ -7,7 +7,7 @@
 
 #include "asm.h"
 
-//void hexDump(void *addr, int len);
+// void hexDump(void *addr, int len);
 size_t countEqual(const db *addr1, const db *addr2, int len);
 #if _WIN32
 void *memmem(const void *haystack,

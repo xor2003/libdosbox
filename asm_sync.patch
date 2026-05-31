@@ -1,0 +1,146 @@
+diff --git a/src/custom/asm.h b/src/custom/asm.h
+index 4cc7ebf74..e6f0598a6 100644
+--- a/src/custom/asm.h
++++ b/src/custom/asm.h
+@@ -30,7 +30,7 @@ extern bool from_callf;
+ #include "json.hpp"
+ #include <typeinfo>
+ 
+-#include "custom.h"
++#include "../../include/custom.h"
+ #include "regs.h"
+ 
+ #if M2CDEBUG == -1
+@@ -182,9 +182,34 @@ union flagsUnion{
+ 
+ // Regs
+     struct _STATE {  // masm2c
+-        _STATE() {
+-            call_source=0;
+-        }
++        _STATE()
++                : eax(0),
++                  ebx(0),
++                  ecx(0),
++                  edx(0),
++                  esi(0),
++                  edi(0),
++                  esp(0),
++                  ebp(0),
++                  eip(0),
++                  cs(0),
++                  ds(0),
++                  es(0),
++                  fs(0),
++                  gs(0),
++                  ss(0),
++                  CF(false),
++                  PF(false),
++                  AF(false),
++                  ZF(false),
++                  SF(false),
++                  DF(false),
++                  OF(false),
++                  IF(false),
++                  TF(false),
++                  other_flags(0),
++                  call_source(0)
++        {}
+ 
+         dd eax;
+         dd ebx;
+@@ -1217,17 +1242,17 @@ AFFECT_CF(((Destination<<m2c::bitsizeof(Destination)+Source) >> (32 - Count)) &
+ static   /* MYINLINE*/ void IDIV2_(dw op1, _STATE* _state) {
+         X86_REGREF
+ 		const auto val = static_cast<int16_t>(op1);
+-    if (val==0) {
+-log_debug("~~fail1\n");CPU_Exception(0);__dispatch_call((cs<<16)+ip, _state);
+-}
++	    if (val==0) {
++	log_debug("~~fail1\n");CPU_Exception(0);__dispatch_call((cs<<16)+ip, _state); return;
++	}
+ 		const auto num = (dx << 16) | ax; 
+ 		const auto quo = num / val; 
+ 		const auto rem = num % val; 
+ 		const auto quo16s = static_cast<int16_t>(quo); 
+-		if (quo != quo16s) 
+-			{
+-log_debug("~~fail2\n");CPU_Exception(0);__dispatch_call((cs<<16)+ip, _state);
+-}
++			if (quo != quo16s) 
++				{
++	log_debug("~~fail2\n");CPU_Exception(0);__dispatch_call((cs<<16)+ip, _state); return;
++	}
+ 		ax = quo16s; 
+ 		dx = static_cast<int16_t>(rem); 
+     AFFECT_OF(false);                                    
+@@ -1927,4 +1952,3 @@ extern void print_instruction_direct(Bit16u newcs, Bit32u newip);
+ 
+ 
+ #endif
+-
+diff --git a/src/custom/asm_regs_decomp.h b/src/custom/asm_regs_decomp.h
+index f38ba9b85..45acd3d85 100644
+--- a/src/custom/asm_regs_decomp.h
++++ b/src/custom/asm_regs_decomp.h
+@@ -1,6 +1,6 @@
+ #ifdef DOSBOX_CUSTOM
+ #define DOSBOX_REGS_H
+-#include "custom.h"
++#include "../../include/custom.h"
+ #else
+ #include "shadowstack.h"
+ #endif
+diff --git a/src/custom/asm.cpp b/src/custom/asm.cpp
+new file mode 100644
+index 000000000..6286cc761
+--- /dev/null
++++ b/src/custom/asm.cpp
+@@ -0,0 +1,47 @@
++#include "asm.h"
++
++namespace m2c {
++uint8_t mem_readb(void *addr)
++{
++	(void)addr;
++	return 0;
++}
++
++uint16_t mem_readw(void *addr)
++{
++	(void)addr;
++	return 0;
++}
++
++uint32_t mem_readd(void *addr)
++{
++	(void)addr;
++	return 0;
++}
++
++void mem_writeb(void *addr, uint8_t val)
++{
++	(void)addr;
++	(void)val;
++}
++
++void mem_writew(void *addr, uint16_t val)
++{
++	(void)addr;
++	(void)val;
++}
++
++void mem_writed(void *addr, uint32_t val)
++{
++	(void)addr;
++	(void)val;
++}
++
++void *raddr_(dw ss, dd esp)
++{
++	(void)ss;
++	(void)esp;
++	static dw dummy = 0;
++	return &dummy;
++}
++} // namespace m2c

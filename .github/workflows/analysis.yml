@@ -20,8 +20,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
       - run:  sudo apt-get update
+      - name: Install clang-format and clang-tidy
+        run:  sudo apt-get install -y clang-format clang-tidy
       - name: Run shellcheck
         run:  ./scripts/verify-bash.sh
+      - name: Run custom C/C++ lints
+        run: |
+          if [ -d builddir ]; then
+            meson setup --reconfigure builddir
+          else
+            meson setup builddir
+          fi
+          ./scripts/verify-custom-lints.sh
       - name: Install pylint
         run: |
           sudo apt-get install python3-setuptools

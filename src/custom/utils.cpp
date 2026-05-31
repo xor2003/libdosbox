@@ -64,13 +64,14 @@ void hexDump(void *addr, int len)
 // Function to compare and print a hexadecimal dump of two memory regions.
 void cmpHexDump(void *addr1, void *addr2, int len)
 {
-	int i, j;
+	int i;
+	size_t j;
 	unsigned char buff1[17];
 	unsigned char buff2[17];
 	unsigned char *pc1 = (unsigned char *)addr1;
 	unsigned char *pc2 = (unsigned char *)addr2;
 
-	printf("cmpHexDump %p %p:\n", pc1, pc2);
+	printf("cmpHexDump %p %p:\n", (void *)pc1, (void *)pc2);
 
 	if (len == 0) {
 		printf("  ZERO LENGTH\n");

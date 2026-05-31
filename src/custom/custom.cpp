@@ -6,7 +6,7 @@
 
 #include "setup.h"
 #include "regs.h"
-#include "custom.h"
+#include "../../include/custom.h"
 #include "custom_hooks.h"
 #include "utils.h"
 #include "dumpexe.h"
@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sstream>
+#include <cctype>
 
 // -- configuration start
 
@@ -97,6 +98,7 @@ ShadowMemory shadow_memory;
 
 void masm2c_exit(unsigned char exit)
 {
+	(void)exit;
 	init++;
 	printf("masm2c_exit Exiting\n");
 	// m2c::stackDump();  // Debug stack dump (disabled)
@@ -108,27 +110,36 @@ void masm2c_exit(unsigned char exit)
         @src:	pathname to a file
         @dst:	string where the filename shoukld be stored
 */
-void init_get_fname(char *executable_name_out, char *source_path) { // Clearer variable names for readability
-    char *current_position = executable_name_out;  // Store starting point of output buffer
-    const char *filename_start = nullptr;         // Initialize pointer to track file name start
-    const char *character = (const char *) source_path;           // Iterate through source path
+void init_get_fname(char *executable_name_out, char *source_path)
+{ // Clearer variable names for readability
+	char *current_position = executable_name_out; // Store starting point of
+	                                              // output buffer
+	const char *filename_start = nullptr; // Initialize pointer to track
+	                                      // file name start
+	const char *character = (const char *)source_path; // Iterate through
+	                                                   // source path
 
-    while (*character != '\0') { // Loop until end of source path is reached
-        if (*character == '\\') {  // Identify directory character ('\')
-            filename_start = character + 1; // Mark the start of the escaped section
-        }
-        character++; 
-    }
+	while (*character != '\0') { // Loop until end of source path is reached
+		if (*character == '\\') { // Identify directory character ('\')
+			filename_start = character + 1; // Mark the start of the
+			                                // escaped section
+		}
+		character++;
+	}
 
-    if (filename_start == nullptr) { // If no escape sequence found, use the entire source path
-        filename_start = (char *)source_path; 
-    }
+	if (filename_start == nullptr) { // If no escape sequence found, use the
+		                         // entire source path
+		filename_start = (char *)source_path;
+	}
 
-    while ((*current_position++ = tolower( * (filename_start++) )) != '\0')  
-        ; // Copy characters from filename section to output, converting to lowercase
-    *current_position = '\0';  // Null-terminate the resulting executable name
+	while ((*current_position++ = static_cast<char>(tolower(
+	                static_cast<unsigned char>(*(filename_start++))))) != '\0')
+		; // Copy characters from filename section to output, converting
+		  // to lowercase
+	*current_position = '\0'; // Null-terminate the resulting executable name
 
-    m2c::exename = executable_name_out; // Update global variable with the processed name
+	m2c::exename = executable_name_out; // Update global variable with the
+	                                    // processed name
 }
 
 namespace m2c {
@@ -153,6 +164,7 @@ void stackDumpZ()
 // Loguru fatal error handler.
 void loguru_fatal(const loguru::Message &message)
 {
+	(void)message;
 	m2c::stackDumpZ();
 }
 
@@ -170,7 +182,7 @@ void custom_init_prog(char *name, Bit16u relocate, Bit16u init_cs, Bit16u init_i
 	static bool registered = false;
 	if (!registered) {
 		loguru::set_fatal_handler(loguru_fatal);
-		atexit(m2c::stackDumpZ);  // Register exit handler for final report
+		atexit(m2c::stackDumpZ); // Register exit handler for final report
 		registered = true;
 	}
 
@@ -237,7 +249,8 @@ int custom_callf(Bitu CS, Bitu IP)
 // Custom exit function for DOSBox sections.
 static void custom_exit(Section *sec)
 {
-	custom_exit_prog(0);  // Cleanup on section exit
+	(void)sec;
+	custom_exit_prog(0); // Cleanup on section exit
 }
 
 // Custom initialization function for DOSBox sections.
@@ -258,18 +271,19 @@ void custom_init(Section *sec)
 
 	// Unused variable.
 	X86_REGREF
-        m2c::_STATE *_state = 0;
+	m2c::_STATE *_state = 0;
 
 	// Register dump hotkey
-	MAPPER_AddHandler(m2c::DumpExe1, SDL_SCANCODE_F2, PRIMARY_MOD, "dumpexe1",
-	                  "Dumpexe1");
-	//MAPPER_AddHandler(DumpExe2, SDL_SCANCODE_F3, PRIMARY_MOD, "dumpexe1",
-	//                  "Dumpexe1");
+	MAPPER_AddHandler(m2c::DumpExe1, SDL_SCANCODE_F2, PRIMARY_MOD,
+	                  "dumpexe1", "Dumpexe1");
+	// MAPPER_AddHandler(DumpExe2, SDL_SCANCODE_F3, PRIMARY_MOD, "dumpexe1",
+	//                   "Dumpexe1");
 }
 
 // Custom initialization function for the entry point.
 void custom_init_entrypoint(char *name, Bit16u loadseg)
 {
+	(void)name;
 	/**
 	 * Entry Point Initialization
 	 *
@@ -278,7 +292,7 @@ void custom_init_entrypoint(char *name, Bit16u loadseg)
 	 * 2. Initialize shadow stack
 	 * 3. Start instruction tracing
 	 */
-	m2c::dumpexe_start_hook(loadseg);  // Start execution hook
+	m2c::dumpexe_start_hook(loadseg); // Start execution hook
 
 	// Check if it's a target binary and if initialization is complete.
 	if (!custom_runs)
@@ -286,7 +300,6 @@ void custom_init_entrypoint(char *name, Bit16u loadseg)
 
 	// Reset last_ip.
 	last_ip = 0xffff;
-
 
 	// Initialize the entry point for translated code.
 	if (init_runs) {
@@ -452,10 +465,9 @@ void dbx_single_step()
 	// Store the old CPU cycle count and instruction pointer.
 	old_cycles = CPU_Cycles;
 	dd oldeip = (Segs.val[1] << 16) + cpu_regs.ip.word[0];
-	dd neweip(oldeip);
+	dd neweip;
 
 	// Variable to store the return code from CPU_Core_Normal_Run().
-	Bits nc_retcode;
 
 	// Set the single-stepping flag and disable the shadow stack.
 	doing_single_step = true;
@@ -466,7 +478,7 @@ void dbx_single_step()
 		// printf("~~s1 %x:%x\n",Segs.val[1],cpu_regs.ip.word[0]);
 		do {
 			CPU_Cycles = 1;
-			nc_retcode = CPU_Core_Normal_Run();
+			(void)CPU_Core_Normal_Run();
 			neweip = (Segs.val[1] << 16) + cpu_regs.ip.word[0];
 		} while (neweip == oldeip); // Handle REP* instructions.
 	} catch (...) {
@@ -499,17 +511,17 @@ void mycopy(db *d, db *s, size_t size, const char *name)
 	// Compare memory contents and print debug information if they differ.
 	int res = memcmp(d, s, size);
 	if (res) {
-		printf("non-equal %s addr=%x size=%d", name,
-		       d - ((db *)&m2c::m), size);
+		printf("non-equal %s addr=%zx size=%zu", name,
+		       (size_t)(d - ((db *)&m2c::m)), size);
 		void *p = memmem(((db *)&m2c::m) + 0x1920, COMPARE_SIZE, s, size);
 		if (size > 3 && p) {
-			printf(" found at %x", ((db *)p) - d);
+			printf(" found at %zx", (size_t)(((db *)p) - d));
 		}
 		printf("\nm2c ");
 		hexDump(s, size);
 		printf("memory ");
 		hexDump(d, size);
-        }
+	}
 #else
 	//      printf("Init %zx %zd\n", d - ((db*)&m), size);
 	// Copy memory contents in non-debug mode.
@@ -518,10 +530,10 @@ void mycopy(db *d, db *s, size_t size, const char *name)
 #endif
 }
 
-
 // Function to dump the stack and shadow memory.
 void stackDump(_STATE *_state)
 {
+	(void)_state;
 	// Ensure the function is called only once.
 	static bool already = false;
 	if (already)
@@ -562,16 +574,16 @@ void log_regs_dbx_direct(size_t counter_,
 	#define reg_32(reg) (cpu_regs.regs[(reg)].dword[DW_INDEX])
 	};*/
 	//   if (trace_instructions)
-	printf("%8x %s:%06d %04X:%04X %s%s%s AX:%04X BX:%04X CX:%04X DX:%04X SI:%04X DI:%04X BP:%04X SP:%04X DS:%04X ES:%04X FS:%04X GS:%04X SS:%04X CF:%x ZF:%x SF:%x OF:%x AF:%x PF:%x IF:%x\n",
-	       counter_, file, line, s.val[1], r.ip, log_spaces(indent), instr,
-	       log_spaces(84 - indent - strlen(instr)), r.regs[0].dword[0],
-	       r.regs[3].dword[0], r.regs[1].dword[0], r.regs[2].dword[0],
-	       r.regs[6].dword[0], r.regs[7].dword[0], r.regs[5].dword[0],
-	       r.regs[4].dword[0], s.val[3], s.val[0], s.val[4], s.val[5],
-	       s.val[2], (r.flags & FLAG_CF) != 0, (r.flags & FLAG_ZF) != 0,
-	       (r.flags & FLAG_SF) != 0, (r.flags & FLAG_OF) != 0,
-	       (r.flags & FLAG_AF) != 0, (r.flags & FLAG_PF) != 0,
-	       (r.flags & FLAG_IF) != 0);
+	printf("%8zx %s:%06d %04X:%04X %s%s%s AX:%04X BX:%04X CX:%04X DX:%04X SI:%04X DI:%04X BP:%04X SP:%04X DS:%04X ES:%04X FS:%04X GS:%04X SS:%04X CF:%x ZF:%x SF:%x OF:%x AF:%x PF:%x IF:%x\n",
+	       counter_, file, line, s.val[1], r.ip.dword[0], log_spaces(indent),
+	       instr, log_spaces(84 - indent - strlen(instr)),
+	       r.regs[0].dword[0], r.regs[3].dword[0], r.regs[1].dword[0],
+	       r.regs[2].dword[0], r.regs[6].dword[0], r.regs[7].dword[0],
+	       r.regs[5].dword[0], r.regs[4].dword[0], s.val[3], s.val[0],
+	       s.val[4], s.val[5], s.val[2], (r.flags & FLAG_CF) != 0,
+	       (r.flags & FLAG_ZF) != 0, (r.flags & FLAG_SF) != 0,
+	       (r.flags & FLAG_OF) != 0, (r.flags & FLAG_AF) != 0,
+	       (r.flags & FLAG_PF) != 0, (r.flags & FLAG_IF) != 0);
 }
 
 // Structure to store CPU state information for tracing.
@@ -793,7 +805,7 @@ bool Jstart(const char *file, int line, const char *instr)
 	// Perform comparison if enabled.
 	if (compare) {
 		memcpy(om, &m, COMPARE_SIZE);
-		strcpy(jump_name, instr);
+		snprintf(jump_name, sizeof(jump_name), "%s", instr);
 		compare_jump = true;
 	}
 
@@ -1264,6 +1276,7 @@ void Xend(const char *file, int line, const char *instr)
 // Function to interpret an unknown callf instruction.
 void interpret_unknown_callf(dw newcs, dd newip, db source)
 {
+	(void)source;
 	// Reference the CPU registers.
 	X86_REGREF
 
@@ -1303,10 +1316,10 @@ void interpret_unknown_callf(dw newcs, dd newip, db source)
 		//  log_debug("start\n");
 		Normal_Loop();
 		//  log_debug("stop\n");
-	} while (return_point.top() != (cs << 16) + ip);
+	} while (return_point.top() != static_cast<Bit32u>((cs << 16) + ip));
 
 	// Handle mismatched return points.
-	if (return_point.top() != (cs << 16) + ip) {
+	if (return_point.top() != static_cast<Bit32u>((cs << 16) + ip)) {
 		log_error("Error cs:ip != return_point %x\n", return_point.top());
 	}
 	/*
@@ -1383,10 +1396,8 @@ void ShadowMemory::collect_selfmod(dw seg,
 	// segment range.
 	if (seg >= 0x192 && seg < 0xa000) {
 		dd target = (seg << 4) + ip;
-		bool created = false;
 		if (m_code.find(target) == m_code.end()) {
 			m_code[target] = std::make_shared<Code>();
-			created = true;
 		}
 		Code &c(*static_cast<Code *>(m_code.find(target)->second.get()));
 		c.m_selfmodified = true;
@@ -1441,7 +1452,7 @@ void ShadowMemory::collect_data(dd b, size_t size)
 void ShadowMemory::dump()
 {
 	if (!collect_rt_info || m_code.empty())
-	     return;
+		return;
 
 	// Mark data addresses accessed multiple times as arrays.
 	for (auto &[key, value] : m_code) {
@@ -1470,9 +1481,9 @@ void ShadowMemory::dump()
 	fclose(f);
 	printf("Saved json\n");
 
-        m_data.clear();
-        m_code.clear();
-        m_jumps.clear();
+	m_data.clear();
+	m_code.clear();
+	m_jumps.clear();
 	//       printf("%s\n",j.dump(3).c_str());
 }
 
@@ -1539,12 +1550,13 @@ void to_json(nlohmann::json &nlohmann_json_j, const ShadowMemory &nlohmann_json_
 // Function to initialize the entry point for translated code.
 void init_entrypoint(Bit16u relocate)
 {
+	(void)relocate;
 	// Reference the CPU registers.
 	X86_REGREF
 
 	// Print debug information.
 	printf("Starting m2c\n");
-	printf("\n\nCS:IP 0x%x:0x%x\tMemBase: %p\n", cs, eip, MemBase);
+	printf("\n\nCS:IP 0x%x:0x%x\tMemBase: %p\n", cs, eip, (void *)MemBase);
 
 	//   memset(((db*)&m2c::m)+0x1920+0x100,0,0xfef0);
 	// Initialize masm2c.
