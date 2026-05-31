@@ -37,6 +37,182 @@ bool collect_rt_info_vars = true;
 
 // -- configuration end
 
+namespace {
+enum class RuntimeProfile : uint8_t {
+	Analysis = 0,
+	Tracing = 1,
+	Compare = 2,
+	CollectOnly = 3,
+};
+
+struct RuntimeProfileStrategy {
+	virtual ~RuntimeProfileStrategy() = default;
+	virtual RuntimeProfile id() const = 0;
+	virtual const char *name() const = 0;
+	virtual void apply() const = 0;
+};
+
+struct AnalysisProfile final : RuntimeProfileStrategy {
+	RuntimeProfile id() const override { return RuntimeProfile::Analysis; }
+	const char *name() const override { return "analysis"; }
+	void apply() const override
+	{
+		compare_mode = false;
+		trace_instructions = false;
+		trace_instructions_to_stdout = false;
+		complex_self_modifications = false;
+		collect_rt_info = true;
+		collect_rt_info_vars = true;
+	}
+};
+
+struct TracingProfile final : RuntimeProfileStrategy {
+	RuntimeProfile id() const override { return RuntimeProfile::Tracing; }
+	const char *name() const override { return "tracing"; }
+	void apply() const override
+	{
+		compare_mode = false;
+		trace_instructions = true;
+		trace_instructions_to_stdout = false;
+		complex_self_modifications = false;
+		collect_rt_info = true;
+		collect_rt_info_vars = true;
+	}
+};
+
+struct CompareProfile final : RuntimeProfileStrategy {
+	RuntimeProfile id() const override { return RuntimeProfile::Compare; }
+	const char *name() const override { return "compare"; }
+	void apply() const override
+	{
+		compare_mode = true;
+		trace_instructions = false;
+		trace_instructions_to_stdout = false;
+		complex_self_modifications = false;
+		collect_rt_info = true;
+		collect_rt_info_vars = true;
+	}
+};
+
+struct CollectOnlyProfile final : RuntimeProfileStrategy {
+	RuntimeProfile id() const override { return RuntimeProfile::CollectOnly; }
+	const char *name() const override { return "collect_only"; }
+	void apply() const override
+	{
+		compare_mode = false;
+		trace_instructions = false;
+		trace_instructions_to_stdout = false;
+		complex_self_modifications = false;
+		collect_rt_info = true;
+		collect_rt_info_vars = false;
+	}
+};
+
+AnalysisProfile k_analysis_profile;
+TracingProfile k_tracing_profile;
+CompareProfile k_compare_profile;
+CollectOnlyProfile k_collect_only_profile;
+
+const RuntimeProfileStrategy *g_active_profile = &k_analysis_profile;
+
+const RuntimeProfileStrategy *profile_by_id(RuntimeProfile p)
+{
+	switch (p) {
+	case RuntimeProfile::Analysis: return &k_analysis_profile;
+	case RuntimeProfile::Tracing: return &k_tracing_profile;
+	case RuntimeProfile::Compare: return &k_compare_profile;
+	case RuntimeProfile::CollectOnly: return &k_collect_only_profile;
+	}
+	return &k_analysis_profile;
+}
+
+void set_runtime_profile(RuntimeProfile p)
+{
+	g_active_profile = profile_by_id(p);
+	g_active_profile->apply();
+	printf("custom profile: %s\n", g_active_profile->name());
+}
+
+void cycle_runtime_profile(bool pressed)
+{
+	if (!pressed)
+		return;
+	const auto current = static_cast<uint8_t>(g_active_profile->id());
+	const auto next = static_cast<RuntimeProfile>((current + 1U) % 4U);
+	set_runtime_profile(next);
+}
+
+void profile_analysis(bool pressed)
+{
+	if (pressed)
+		set_runtime_profile(RuntimeProfile::Analysis);
+}
+
+void profile_tracing(bool pressed)
+{
+	if (pressed)
+		set_runtime_profile(RuntimeProfile::Tracing);
+}
+
+void profile_compare(bool pressed)
+{
+	if (pressed)
+		set_runtime_profile(RuntimeProfile::Compare);
+}
+
+void toggle_compare_mode(bool pressed)
+{
+	if (!pressed)
+		return;
+	compare_mode = !compare_mode;
+	printf("custom option: compare_mode=%d\n", compare_mode ? 1 : 0);
+}
+
+void toggle_trace_mode(bool pressed)
+{
+	if (!pressed)
+		return;
+	trace_instructions = !trace_instructions;
+	printf("custom option: trace_instructions=%d\n",
+	       trace_instructions ? 1 : 0);
+}
+
+void toggle_trace_stdout_mode(bool pressed)
+{
+	if (!pressed)
+		return;
+	trace_instructions_to_stdout = !trace_instructions_to_stdout;
+	printf("custom option: trace_instructions_to_stdout=%d\n",
+	       trace_instructions_to_stdout ? 1 : 0);
+}
+
+void toggle_collect_rt_info_mode(bool pressed)
+{
+	if (!pressed)
+		return;
+	collect_rt_info = !collect_rt_info;
+	printf("custom option: collect_rt_info=%d\n", collect_rt_info ? 1 : 0);
+}
+
+void toggle_collect_rt_info_vars_mode(bool pressed)
+{
+	if (!pressed)
+		return;
+	collect_rt_info_vars = !collect_rt_info_vars;
+	printf("custom option: collect_rt_info_vars=%d\n",
+	       collect_rt_info_vars ? 1 : 0);
+}
+
+void toggle_complex_self_modifications_mode(bool pressed)
+{
+	if (!pressed)
+		return;
+	complex_self_modifications = !complex_self_modifications;
+	printf("custom option: complex_self_modifications=%d\n",
+	       complex_self_modifications ? 1 : 0);
+}
+} // namespace
+
 // Function to disassemble x86 instructions (defined in DOSBox).
 extern Bitu DasmI386(char *buffer, PhysPt pc, Bitu cur_ip, bool bit32);
 
@@ -276,6 +452,28 @@ void custom_init(Section *sec)
 	// Register dump hotkey
 	MAPPER_AddHandler(m2c::DumpExe1, SDL_SCANCODE_F2, PRIMARY_MOD,
 	                  "dumpexe1", "Dumpexe1");
+	MAPPER_AddHandler(cycle_runtime_profile, SDL_SCANCODE_F3, PRIMARY_MOD,
+	                  "custprof", "Custom profile");
+	MAPPER_AddHandler(profile_analysis, SDL_SCANCODE_F4, PRIMARY_MOD,
+	                  "custanal", "Custom analysis");
+	MAPPER_AddHandler(profile_tracing, SDL_SCANCODE_F5, PRIMARY_MOD,
+	                  "custtrace", "Custom tracing");
+	MAPPER_AddHandler(profile_compare, SDL_SCANCODE_F6, PRIMARY_MOD,
+	                  "custcmp", "Custom compare");
+	MAPPER_AddHandler(toggle_compare_mode, SDL_SCANCODE_1, PRIMARY_MOD,
+	                  "custcmp_t", "Toggle compare");
+	MAPPER_AddHandler(toggle_trace_mode, SDL_SCANCODE_2, PRIMARY_MOD,
+	                  "custtr_t", "Toggle trace");
+	MAPPER_AddHandler(toggle_trace_stdout_mode, SDL_SCANCODE_3, PRIMARY_MOD,
+	                  "custto_t", "Toggle trace stdout");
+	MAPPER_AddHandler(toggle_collect_rt_info_mode, SDL_SCANCODE_4,
+	                  PRIMARY_MOD, "custri_t", "Toggle collect rt");
+	MAPPER_AddHandler(toggle_collect_rt_info_vars_mode, SDL_SCANCODE_5,
+	                  PRIMARY_MOD, "custrv_t", "Toggle collect vars");
+	MAPPER_AddHandler(toggle_complex_self_modifications_mode,
+	                  SDL_SCANCODE_6, PRIMARY_MOD, "custsm_t",
+	                  "Toggle complex selfmod");
+	set_runtime_profile(RuntimeProfile::Analysis);
 	// MAPPER_AddHandler(DumpExe2, SDL_SCANCODE_F3, PRIMARY_MOD, "dumpexe1",
 	//                   "Dumpexe1");
 }

@@ -386,3 +386,31 @@ Use it to reapply hooks after syncing with upstream `dosbox-staging`, or when po
   - `git blame -L 262,375 include/paging.h`
 - Build a focused patch bundle:
   - `git diff upstream/main -- meson.build include/custom.h src/dosbox.cpp src/dos/dos_execute.cpp src/cpu/cpu.cpp src/cpu/core_normal.cpp src/cpu/core_normal/prefix_none.h include/paging.h src/custom > libdosbox-hooks.patch`
+
+## Custom Runtime Modes (Profiles and Toggles)
+
+`src/custom/custom.cpp` registers runtime mode controls via mapper hotkeys.
+
+### Profiles
+
+- `Ctrl+F3`: cycle profile (`analysis -> tracing -> compare -> collect_only`)
+- `Ctrl+F4`: set `analysis`
+- `Ctrl+F5`: set `tracing`
+- `Ctrl+F6`: set `compare`
+
+### Per-option toggles
+
+- `Ctrl+1`: toggle `compare_mode`
+- `Ctrl+2`: toggle `trace_instructions`
+- `Ctrl+3`: toggle `trace_instructions_to_stdout`
+- `Ctrl+4`: toggle `collect_rt_info`
+- `Ctrl+5`: toggle `collect_rt_info_vars`
+- `Ctrl+6`: toggle `complex_self_modifications`
+
+### Order / precedence
+
+- Profiles and toggles are combined.
+- The last action wins.
+- Setting a profile rewrites the whole option set.
+- After choosing a profile, you can still fine-tune with per-option toggles.
+- Choosing another profile later overrides those manual toggles again.
