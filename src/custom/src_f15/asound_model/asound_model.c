@@ -2,6 +2,11 @@
 
 #include <string.h>
 
+static AsoundDriver asound_drv;
+static AsoundU16 asound_drv_seg;
+static AsoundU16 asound_drv_pitch;
+static AsoundU8 asound_drv_drone;
+
 const SampleRange asound_sample_variant_ranges[ASOUND_SAMPLE_VARIANT_COUNT] = {
         {0x5c92u, 0x4797u},
         {0x6a1au, 0x5c93u},
@@ -591,6 +596,28 @@ void asound_driver_tick(AsoundDriver* driver, AsoundEventLog* log)
 	}
 }
 
+void asound_driver_play_sample(AsoundDriver* driver, AsoundU8 sample_index)
+{
+	if (!driver) {
+		return;
+	}
+
+	if (sample_index > 2u) {
+		return;
+	}
+
+	/* Compatibility model:
+	 *	ASOUND case #1 rotates sample variant selection.
+	 *	Case #2 uses fixed sample data.
+	 *	Case #0 is a legacy variant 0 path.
+	 */
+	if (sample_index == 1u) {
+		driver->sample_variant_index =
+		        asound_sample_variant_next(driver->sample_variant_index,
+		                                driver->sample_variant_max_index);
+	}
+}
+
 size_t asound_driver_tick_events(AsoundDriver* driver,
                                 AsoundEvent* events,
                                 size_t event_capacity)
@@ -660,4 +687,68 @@ void asound_driver_tick_and_dispatch(AsoundDriver* driver,
 	if (callback) {
 		asound_events_dispatch(sink_events, count, callback, callback_user);
 	}
+}
+
+void sound_driver_setup(AsoundU16 setup_value, AsoundU16 driver_segment)
+{
+	asound_driver_init(&asound_drv, setup_value);
+	asound_drv_seg = driver_segment;
+}
+
+void sound_driver_shutdown(void)
+{
+	asound_driver_shutdown(&asound_drv);
+}
+
+int sound_driver_dispatch_sound(AsoundU16 dispatch_offset)
+{
+	return asound_driver_dispatch_sound(&asound_drv,
+	                                  (AsoundU8)dispatch_offset);
+}
+
+int sound_driver_play_sample(AsoundU16 sample_index)
+{
+	if (sample_index > 2u) {
+		return 0;
+	}
+	asound_driver_play_sample(&asound_drv, (AsoundU8)sample_index);
+	return 1;
+}
+
+void sound_driver_play_intro(void)
+{
+	/* Compatibility stub: original ASM conditionally starts an intro routine.
+	 * Keep this a safe no-op in the pure model.
+	 */
+	(void)asound_drv_seg;
+}
+
+void sound_driver_set_drone_pitch(AsoundU16 pitch)
+{
+	asound_drv_pitch = pitch;
+}
+
+void sound_driver_enable_drone(void)
+{
+	asound_drv_drone = 1u;
+}
+
+void sound_driver_disable_drone(void)
+{
+	asound_drv_drone = 0u;
+}
+
+void sound_driver_timer_tick(void)
+{
+	AsoundEvent scratch[16];
+	AsoundEventLog log;
+	asound_log_init(&log, scratch, 16);
+	asound_driver_tick(&asound_drv, &log);
+}
+
+void sound_driver_noise_tick(void)
+{
+	/* Compatibility stub: no direct noise pitch model state currently exposed. */
+	(void)asound_drv_pitch;
+	(void)asound_drv_drone;
 }

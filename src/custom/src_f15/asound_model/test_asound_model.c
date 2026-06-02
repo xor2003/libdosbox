@@ -195,6 +195,30 @@ static void test_driver_dispatch_rejects_unknown_or_odd_offsets(void)
 	assert(!asound_driver_dispatch_sound(&driver, 0x23u));
 }
 
+static void test_sound_driver_compat_wrappers(void)
+{
+	AsoundEvent events[16];
+	AsoundEventLog log;
+
+	asound_log_init(&log, events, 16);
+
+	audio_slot_64(0x7d9du, 0x11a3u);
+	assert(sound_driver_dispatch_sound(0x0au));
+	assert(sound_driver_play_sample(0x00u));
+	assert(!sound_driver_play_sample(0xFFu));
+	assert(audio_slot_66(0x00u) == 0 || audio_slot_66(0x00u) == 1);
+	assert(audio_slot_6d(0x01u) == 1);
+	assert(!audio_slot_6d(0xFFu));
+	sound_driver_set_drone_pitch(0x2ABCu);
+	sound_driver_enable_drone();
+	sound_driver_disable_drone();
+	sound_driver_play_intro();
+	sound_driver_timer_tick();
+	sound_driver_noise_tick();
+	audio_slot_65();
+	(void)events;
+}
+
 static void test_tick_and_dispatch_callbacks(void)
 {
 	AsoundEvent events[16];
@@ -280,6 +304,7 @@ int main(void)
 	test_driver_dispatch_random_streams();
 	test_driver_dispatch_idle_guard();
 	test_driver_dispatch_rejects_unknown_or_odd_offsets();
+	test_sound_driver_compat_wrappers();
 	test_tick_and_dispatch_callbacks();
 	test_tick_and_dispatch_without_counter();
 	test_tick_and_dispatch_without_buffer();

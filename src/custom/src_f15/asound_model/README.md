@@ -2,6 +2,13 @@
 
 This directory contains a small C model of selected ASOUND behavior. It is not a replacement driver yet; it is a deterministic test harness for the data structures and bytecode semantics decoded in `../asound_rebuild/asound_rebuild.asm`.
 
+The model now exposes **compatibility entry points** for the original ASOUND/F14 ABI:
+
+- `sound_driver_*` functions with the same argument shapes as the reconstructed ASM entrytable.
+- `audio_slot_64..audio_slot_6d` and `audio_jump_64..audio_jump_6d` aliases.
+
+Compatibility is signature-level only in this phase: the modern C model keeps deterministic stream/event logic and does not emit direct OPL I/O traffic.
+
 ## Callback API
 
 `asound_driver_tick_and_dispatch()` is available for modern C host integration. It:
