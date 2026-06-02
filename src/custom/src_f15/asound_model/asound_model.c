@@ -8,9 +8,9 @@ static AsoundU16 asound_drv_pitch;
 static AsoundU8 asound_drv_drone;
 
 const SampleRange asound_sample_variant_ranges[ASOUND_SAMPLE_VARIANT_COUNT] = {
-        {0x5c92u, 0x4797u},
-        {0x6a1au, 0x5c93u},
-        {0x7d9du, 0x6a1bu},
+        {0x4797u, 0x5c92u},
+        {0x5c93u, 0x6a1au},
+        {0x6a1bu, 0x7d9du},
 };
 
 const AsoundU8 asound_stream_121d6[] = {
@@ -591,6 +591,15 @@ void asound_driver_tick(AsoundDriver* driver, AsoundEventLog* log)
 	if (!driver) {
 		return;
 	}
+	if (driver->pending_sample_valid && log) {
+		if (asound_log_push(log,
+		                    ASOUND_EVENT_SAMPLE_RANGE,
+		                    driver->pending_sample_voice,
+		                    driver->pending_sample_start,
+		                    driver->pending_sample_end)) {
+			driver->pending_sample_valid = 0u;
+		}
+	}
 	for (voice = 0; voice < ASOUND_STREAM_COUNT; ++voice) {
 		asound_stream_step(&driver->streams[voice], voice, log);
 	}
@@ -606,21 +615,34 @@ void asound_driver_play_sample(AsoundDriver* driver, AsoundU8 sample_index)
 		return;
 	}
 
-	/* Compatibility model:
-	 *	ASOUND case #1 rotates sample variant selection.
-	 *	Case #2 uses fixed sample data.
-	 *	Case #0 is a legacy variant 0 path.
-	 */
+	driver->pending_sample_voice = 0u;
+	driver->pending_sample_valid = 1u;
+
 	if (sample_index == 1u) {
-		driver->sample_variant_index =
-		        asound_sample_variant_next(driver->sample_variant_index,
-		                                driver->sample_variant_max_index);
+		driver->sample_variant_index = asound_sample_variant_next(
+		        driver->sample_variant_index,
+		        driver->sample_variant_max_index);
+		driver->pending_sample_start = asound_sample_variant_range(
+		                                       driver->sample_variant_index)
+		                                       .start;
+		driver->pending_sample_end = asound_sample_variant_range(
+		                                     driver->sample_variant_index)
+		                                     .end;
+		return;
 	}
+
+	if (sample_index == 0u) {
+		driver->pending_sample_start = 0x0000u;
+		driver->pending_sample_end   = 0x31f3u;
+		return;
+	}
+
+	driver->pending_sample_start = 0x31f4u;
+	driver->pending_sample_end   = 0x4796u;
 }
 
-size_t asound_driver_tick_events(AsoundDriver* driver,
-                                AsoundEvent* events,
-                                size_t event_capacity)
+size_t asound_driver_tick_events(AsoundDriver* driver, AsoundEvent* events,
+                                 size_t event_capacity)
 {
 	AsoundEventLog log;
 	asound_log_init(&log, events, event_capacity);
@@ -629,23 +651,16 @@ size_t asound_driver_tick_events(AsoundDriver* driver,
 }
 
 void asound_event_dispatch(const AsoundEvent* event,
-                          AsoundEventCallback callback,
-                          void* callback_user)
+                           AsoundEventCallback callback, void* callback_user)
 {
 	if (!event || !callback) {
 		return;
 	}
-	callback(callback_user,
-	         event->type,
-	         event->voice,
-	         event->a,
-	         event->b);
+	callback(callback_user, event->type, event->voice, event->a, event->b);
 }
 
-void asound_events_dispatch(const AsoundEvent* events,
-                           size_t event_count,
-                           AsoundEventCallback callback,
-                           void* callback_user)
+void asound_events_dispatch(const AsoundEvent* events, size_t event_count,
+                            AsoundEventCallback callback, void* callback_user)
 {
 	size_t i;
 	if (!callback) {
@@ -656,27 +671,25 @@ void asound_events_dispatch(const AsoundEvent* events,
 	}
 }
 
-void asound_driver_tick_and_dispatch(AsoundDriver* driver,
-                                    AsoundEvent* events,
-                                    size_t event_capacity,
-                                    size_t* event_count,
-                                    AsoundEventCallback callback,
-                                    void* callback_user)
+void asound_driver_tick_and_dispatch(AsoundDriver* driver, AsoundEvent* events,
+                                     size_t event_capacity, size_t* event_count,
+                                     AsoundEventCallback callback, void* callback_user)
 {
 	size_t count;
 	size_t sink_capacity;
 	AsoundEvent* sink_events;
 
-	/* Keep callback mode useful even when caller only wants immediate dispatch.
-	 * Use a local scratch buffer so callbacks still receive events.
+	/* Keep callback mode useful even when caller only wants immediate
+	 * dispatch. Use a local scratch buffer so callbacks still receive
+	 * events.
 	 */
 	if (events == 0 || event_capacity == 0) {
 		static const size_t scratch_capacity = 64;
 		static AsoundEvent scratch_events[64];
 		sink_capacity = scratch_capacity;
-		sink_events = scratch_events;
+		sink_events   = scratch_events;
 	} else {
-		sink_events = events;
+		sink_events   = events;
 		sink_capacity = event_capacity;
 	}
 
@@ -702,8 +715,7 @@ void sound_driver_shutdown(void)
 
 int sound_driver_dispatch_sound(AsoundU16 dispatch_offset)
 {
-	return asound_driver_dispatch_sound(&asound_drv,
-	                                  (AsoundU8)dispatch_offset);
+	return asound_driver_dispatch_sound(&asound_drv, (AsoundU8)dispatch_offset);
 }
 
 int sound_driver_play_sample(AsoundU16 sample_index)
@@ -717,8 +729,8 @@ int sound_driver_play_sample(AsoundU16 sample_index)
 
 void sound_driver_play_intro(void)
 {
-	/* Compatibility stub: original ASM conditionally starts an intro routine.
-	 * Keep this a safe no-op in the pure model.
+	/* Compatibility stub: original ASM conditionally starts an intro
+	 * routine. Keep this a safe no-op in the pure model.
 	 */
 	(void)asound_drv_seg;
 }
@@ -748,7 +760,8 @@ void sound_driver_timer_tick(void)
 
 void sound_driver_noise_tick(void)
 {
-	/* Compatibility stub: no direct noise pitch model state currently exposed. */
+	/* Compatibility stub: no direct noise pitch model state currently
+	 * exposed. */
 	(void)asound_drv_pitch;
 	(void)asound_drv_drone;
 }

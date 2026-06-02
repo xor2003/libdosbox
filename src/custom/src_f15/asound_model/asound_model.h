@@ -40,11 +40,8 @@ typedef struct AsoundEventLog {
 	size_t capacity;
 } AsoundEventLog;
 
-typedef void (*AsoundEventCallback)(void* user,
-                                    AsoundEventType type,
-                                    AsoundU8 voice,
-                                    AsoundU16 a,
-                                    AsoundU16 b);
+typedef void (*AsoundEventCallback)(void* user, AsoundEventType type,
+                                    AsoundU8 voice, AsoundU16 a, AsoundU16 b);
 
 typedef struct SoundStreamState {
 	AsoundU8 ticks_left;
@@ -64,8 +61,8 @@ typedef struct SoundStreamState {
 } SoundStreamState;
 
 typedef struct SampleRange {
-	AsoundU16 end;
 	AsoundU16 start;
+	AsoundU16 end;
 } SampleRange;
 
 typedef struct AsoundDriver {
@@ -73,6 +70,10 @@ typedef struct AsoundDriver {
 	AsoundU8 sample_variant_index;
 	AsoundU8 sample_variant_max_index;
 	AsoundU16 random_seed;
+	AsoundU8 pending_sample_valid;
+	AsoundU8 pending_sample_voice;
+	AsoundU16 pending_sample_start;
+	AsoundU16 pending_sample_end;
 } AsoundDriver;
 
 #define ASOUND_SAMPLE_VARIANT_COUNT 3
@@ -118,25 +119,18 @@ SampleRange asound_sample_variant_range(AsoundU8 index);
 
 void asound_driver_init(AsoundDriver* driver, AsoundU16 setup_value);
 void asound_driver_shutdown(AsoundDriver* driver);
-int asound_driver_dispatch_sound(AsoundDriver* driver,
-                                        AsoundU8 dispatch_offset);
+int asound_driver_dispatch_sound(AsoundDriver* driver, AsoundU8 dispatch_offset);
 void asound_driver_tick(AsoundDriver* driver, AsoundEventLog* log);
-size_t asound_driver_tick_events(AsoundDriver* driver,
-                                AsoundEvent* events,
-                                size_t event_capacity);
-void asound_driver_tick_and_dispatch(AsoundDriver* driver,
-                                    AsoundEvent* events,
-                                    size_t event_capacity,
-                                    size_t* event_count,
-                                    AsoundEventCallback callback,
-                                    void* callback_user);
-void asound_events_dispatch(const AsoundEvent* events,
-                           size_t event_count,
-                           AsoundEventCallback callback,
-                           void* callback_user);
+size_t asound_driver_tick_events(AsoundDriver* driver, AsoundEvent* events,
+                                 size_t event_capacity);
+void asound_driver_tick_and_dispatch(AsoundDriver* driver, AsoundEvent* events,
+                                     size_t event_capacity, size_t* event_count,
+                                     AsoundEventCallback callback,
+                                     void* callback_user);
+void asound_events_dispatch(const AsoundEvent* events, size_t event_count,
+                            AsoundEventCallback callback, void* callback_user);
 void asound_event_dispatch(const AsoundEvent* event,
-                          AsoundEventCallback callback,
-                          void* callback_user);
+                           AsoundEventCallback callback, void* callback_user);
 
 /* Compatibility: legacy ASOUND/F14 ABI entrypoint emulation. */
 void asound_driver_play_sample(AsoundDriver* driver, AsoundU8 sample_index);
@@ -153,27 +147,27 @@ void sound_driver_timer_tick(void);
 void sound_driver_noise_tick(void);
 
 /* F14-style slot/wrapper aliases, kept for drop-in source compatibility. */
-#define audio_slot_64(s1, s2)            sound_driver_setup((s1), (s2))
-#define audio_slot_65()                  sound_driver_shutdown()
-#define audio_slot_66(v)                 sound_driver_dispatch_sound((v))
-#define audio_slot_67()                  sound_driver_play_intro()
-#define audio_slot_68()                  sound_driver_enable_drone()
-#define audio_slot_69()                  sound_driver_disable_drone()
-#define audio_slot_6a(p)                 sound_driver_set_drone_pitch((p))
-#define audio_slot_6b()                  sound_driver_timer_tick()
-#define audio_slot_6c()                  sound_driver_noise_tick()
-#define audio_slot_6d(v)                 sound_driver_play_sample((v))
+#define audio_slot_64(s1, s2) sound_driver_setup((s1), (s2))
+#define audio_slot_65()       sound_driver_shutdown()
+#define audio_slot_66(v)      sound_driver_dispatch_sound((v))
+#define audio_slot_67()       sound_driver_play_intro()
+#define audio_slot_68()       sound_driver_enable_drone()
+#define audio_slot_69()       sound_driver_disable_drone()
+#define audio_slot_6a(p)      sound_driver_set_drone_pitch((p))
+#define audio_slot_6b()       sound_driver_timer_tick()
+#define audio_slot_6c()       sound_driver_noise_tick()
+#define audio_slot_6d(v)      sound_driver_play_sample((v))
 
-#define audio_jump_64(asetup, _aseg)     sound_driver_setup((asetup), (_aseg))
-#define audio_jump_65()                  sound_driver_shutdown()
-#define audio_jump_66(v)                 sound_driver_dispatch_sound((v))
-#define audio_jump_67()                  sound_driver_play_intro()
-#define audio_jump_68()                  sound_driver_enable_drone()
-#define audio_jump_69()                  sound_driver_disable_drone()
-#define audio_jump_6a(p)                 sound_driver_set_drone_pitch((p))
-#define audio_jump_6b()                  sound_driver_timer_tick()
-#define audio_jump_6c()                  sound_driver_noise_tick()
-#define audio_jump_6d(v)                 sound_driver_play_sample((v))
+#define audio_jump_64(asetup, _aseg) sound_driver_setup((asetup), (_aseg))
+#define audio_jump_65()              sound_driver_shutdown()
+#define audio_jump_66(v)             sound_driver_dispatch_sound((v))
+#define audio_jump_67()              sound_driver_play_intro()
+#define audio_jump_68()              sound_driver_enable_drone()
+#define audio_jump_69()              sound_driver_disable_drone()
+#define audio_jump_6a(p)             sound_driver_set_drone_pitch((p))
+#define audio_jump_6b()              sound_driver_timer_tick()
+#define audio_jump_6c()              sound_driver_noise_tick()
+#define audio_jump_6d(v)             sound_driver_play_sample((v))
 
 #ifdef __cplusplus
 }

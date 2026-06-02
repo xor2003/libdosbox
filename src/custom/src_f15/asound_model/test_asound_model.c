@@ -19,14 +19,12 @@ typedef struct CallbackCollector {
 	size_t count;
 } CallbackCollector;
 
-static void callback_collector(void* user,
-                              AsoundEventType type,
-                              AsoundU8 voice,
-                              AsoundU16 a,
-                              AsoundU16 b)
+static void callback_collector(void* user, AsoundEventType type, AsoundU8 voice,
+                               AsoundU16 a, AsoundU16 b)
 {
 	CallbackCollector* collector = (CallbackCollector*)user;
-	if (collector->count < (size_t)(sizeof(collector->events) / sizeof(collector->events[0]))) {
+	if (collector->count <
+	    (size_t)(sizeof(collector->events) / sizeof(collector->events[0]))) {
 		collector->events[collector->count].type  = type;
 		collector->events[collector->count].voice = voice;
 		collector->events[collector->count].a     = a;
@@ -195,6 +193,36 @@ static void test_driver_dispatch_rejects_unknown_or_odd_offsets(void)
 	assert(!asound_driver_dispatch_sound(&driver, 0x23u));
 }
 
+static void test_driver_play_sample_events(void)
+{
+	AsoundEvent events[8];
+	AsoundEventLog log;
+	AsoundDriver driver;
+	SampleRange r;
+
+	asound_log_init(&log, events, 8);
+	asound_driver_init(&driver, 0x7d9du);
+	driver.sample_variant_index = 0;
+	asound_driver_play_sample(&driver, 0x00u);
+	asound_driver_tick(&driver, &log);
+	expect_event(&log, 0, ASOUND_EVENT_SAMPLE_RANGE, 0, 0x0000u, 0x31f3u);
+
+	asound_log_init(&log, events, 8);
+	asound_driver_init(&driver, 0x7d9du);
+	driver.sample_variant_index = 0;
+	asound_driver_play_sample(&driver, 0x01u);
+	r = asound_sample_variant_range(1u);
+	asound_driver_tick(&driver, &log);
+	expect_event(&log, 0, ASOUND_EVENT_SAMPLE_RANGE, 0, r.start, r.end);
+	assert(driver.sample_variant_index == 1u);
+
+	asound_log_init(&log, events, 8);
+	asound_driver_init(&driver, 0x7d9du);
+	asound_driver_play_sample(&driver, 0x02u);
+	asound_driver_tick(&driver, &log);
+	expect_event(&log, 0, ASOUND_EVENT_SAMPLE_RANGE, 0, 0x31f4u, 0x4796u);
+}
+
 static void test_sound_driver_compat_wrappers(void)
 {
 	AsoundEvent events[16];
@@ -231,22 +259,14 @@ static void test_tick_and_dispatch_callbacks(void)
 	assert(asound_driver_dispatch_sound(&driver, 0x0au));
 
 	collector.count = 0;
-	asound_driver_tick_and_dispatch(&driver,
-	                              events,
-	                              16,
-	                              &event_count,
-	                              callback_collector,
-	                              &collector);
+	asound_driver_tick_and_dispatch(
+	        &driver, events, 16, &event_count, callback_collector, &collector);
 	asound_log_init(&log, events, 16);
 	log.count = event_count;
 
 	assert(event_count == collector.count);
 	assert(event_count >= 5);
-	expect_event(&log, 0,
-	            ASOUND_EVENT_INSTRUMENT,
-	            3,
-	            0x08u,
-	            0u);
+	expect_event(&log, 0, ASOUND_EVENT_INSTRUMENT, 3, 0x08u, 0u);
 	assert(collector.events[0].type == ASOUND_EVENT_INSTRUMENT);
 	assert(collector.events[0].voice == 3);
 	assert(collector.events[0].a == 0x08u);
@@ -267,12 +287,8 @@ static void test_tick_and_dispatch_without_counter(void)
 	assert(asound_driver_dispatch_sound(&driver, 0x0au));
 
 	collector.count = 0;
-	asound_driver_tick_and_dispatch(&driver,
-	                              events,
-	                              16,
-	                              0,
-	                              callback_collector,
-	                              &collector);
+	asound_driver_tick_and_dispatch(
+	        &driver, events, 16, 0, callback_collector, &collector);
 	assert(collector.count >= 5);
 }
 
@@ -285,12 +301,7 @@ static void test_tick_and_dispatch_without_buffer(void)
 	assert(asound_driver_dispatch_sound(&driver, 0x0au));
 
 	collector.count = 0;
-	asound_driver_tick_and_dispatch(&driver,
-	                              0,
-	                              0,
-	                              0,
-	                              callback_collector,
-	                              &collector);
+	asound_driver_tick_and_dispatch(&driver, 0, 0, 0, callback_collector, &collector);
 	assert(collector.count >= 5);
 }
 
@@ -304,6 +315,7 @@ int main(void)
 	test_driver_dispatch_random_streams();
 	test_driver_dispatch_idle_guard();
 	test_driver_dispatch_rejects_unknown_or_odd_offsets();
+	test_driver_play_sample_events();
 	test_sound_driver_compat_wrappers();
 	test_tick_and_dispatch_callbacks();
 	test_tick_and_dispatch_without_counter();

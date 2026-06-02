@@ -5,32 +5,20 @@
 static const char* event_name(AsoundEventType type)
 {
 	switch (type) {
-	case ASOUND_EVENT_INSTRUMENT:
-		return "INSTRUMENT";
-	case ASOUND_EVENT_VOLUME:
-		return "VOLUME";
-	case ASOUND_EVENT_PITCH_DELTA:
-		return "PITCH_DELTA";
-	case ASOUND_EVENT_KEYOFF_GAP:
-		return "KEYOFF_GAP";
-	case ASOUND_EVENT_KEY_ON:
-		return "KEY_ON";
-	case ASOUND_EVENT_KEY_OFF:
-		return "KEY_OFF";
-	case ASOUND_EVENT_STREAM_END:
-		return "STREAM_END";
-	case ASOUND_EVENT_SAMPLE_RANGE:
-		return "SAMPLE_RANGE";
-	default:
-		return "UNKNOWN";
+	case ASOUND_EVENT_INSTRUMENT: return "INSTRUMENT";
+	case ASOUND_EVENT_VOLUME: return "VOLUME";
+	case ASOUND_EVENT_PITCH_DELTA: return "PITCH_DELTA";
+	case ASOUND_EVENT_KEYOFF_GAP: return "KEYOFF_GAP";
+	case ASOUND_EVENT_KEY_ON: return "KEY_ON";
+	case ASOUND_EVENT_KEY_OFF: return "KEY_OFF";
+	case ASOUND_EVENT_STREAM_END: return "STREAM_END";
+	case ASOUND_EVENT_SAMPLE_RANGE: return "SAMPLE_RANGE";
+	default: return "UNKNOWN";
 	}
 }
 
-static void callback(void* user,
-                     AsoundEventType type,
-                     AsoundU8 voice,
-                     AsoundU16 a,
-                     AsoundU16 b)
+static void callback(void* user, AsoundEventType type, AsoundU8 voice,
+                     AsoundU16 a, AsoundU16 b)
 {
 	unsigned long tick = (unsigned long)(*(unsigned long*)user);
 	printf("[tick %lu] %-12s v=%u a=%u b=%u\n",
@@ -78,12 +66,11 @@ int main(int argc, char** argv)
 {
 	AsoundRuntime runtime;
 	AsoundEvent events[64];
-	unsigned long setup_value = 0x7d9dUL;
+	unsigned long setup_value     = 0x7d9dUL;
 	unsigned long dispatch_offset = 0x0aUL;
-	unsigned long ticks = 16;
+	unsigned long ticks           = 16;
 	unsigned long tick;
 	AsoundU8 offset;
-	size_t i;
 	size_t count;
 
 	if (argc > 1) {
