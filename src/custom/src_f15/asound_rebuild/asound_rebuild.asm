@@ -20,6 +20,7 @@ SoundStreamState ends
 
 seg11a3         segment para public 'DATA' use16
                 assume cs:seg11a3
+seg11a3_payload_start label byte
 aF15IiAdlib3149 db 'F15 II AdLib 3-14-91',0
                 db 0,0,0
                 dw seg seg127c
@@ -30,7 +31,7 @@ aF15IiAdlib3149 db 'F15 II AdLib 3-14-91',0
                 ; audio_jump_64..audio_jump_6d; those aliases are kept at
                 ; the entry labels below.
 sound_driver_first_slot  dw 64h         ; first overlay slot: 0x64
-sound_driver_image_size  dw 22ACh       ; 8876-byte payload, excluding MZ header
+sound_driver_image_size  dw asound_payload_size   ; 8876-byte payload, excluding MZ header
 sound_driver_reserved    dw 0
 sound_driver_entry_count dw 0Ah         ; ten exported entries follow
                 dw offset sound_driver_setup
@@ -1743,6 +1744,7 @@ word_127BC      dw 0                    ; DATA XREF: opl_apply_operator_level+7�
                                         ; opl_apply_attack_decay+7↓r ...
 word_127BE      dw 0                    ; DATA XREF: opl_apply_operator_level+10↓r
                                         ; opl_apply_operator_level+22↓r ...
+seg11a3_size EQU ($ - seg11a3_payload_start)
 seg11a3         ends
 
 ; ===========================================================================
@@ -1751,6 +1753,7 @@ seg11a3         ends
 seg127c         segment para public 'CODE' use16
                 assume cs:seg127c
                 assume cs:seg127c, ds:seg11a3, ss:seg11a3
+seg127c_payload_start label byte
 ; Missing labels from IDA listing, expressed as offsets in seg127c
                 db    0
                 db    0
@@ -4971,10 +4974,12 @@ adlib_update_all_streams       endp
 
 ; ---------------------------------------------------------------------------
                 db 0
+seg127c_size EQU ($ - seg127c_payload_start)
 seg127c         ends
 
 ; ===========================================================================
 
 ; Segment type: Pure data
+asound_payload_size EQU seg11a3_size + seg127c_size
 
 end
