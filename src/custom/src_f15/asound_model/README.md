@@ -47,6 +47,18 @@ src/custom/src_f15/asound_model/run_tests.sh
 
 The test binaries are built in `/tmp/asound_model_tests` (default compiler) and `/tmp/asound_model_tests_clang` (if `clang` exists), and are independent from the main DOSBox test suite.
 
+For a quick modern-C smoke test that prints semantic events from the model:
+
+```bash
+src/custom/src_f15/asound_model/run_demo.sh <setup> <dispatch_offset> <ticks>
+```
+
+Example:
+
+```bash
+src/custom/src_f15/asound_model/run_demo.sh 0x7d9d 0x0a 24
+```
+
 ## Next Steps
 
 - Add all ASOUND bytecode streams as named data.

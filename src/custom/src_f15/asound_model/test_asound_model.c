@@ -252,6 +252,24 @@ static void test_tick_and_dispatch_without_counter(void)
 	assert(collector.count >= 5);
 }
 
+static void test_tick_and_dispatch_without_buffer(void)
+{
+	CallbackCollector collector;
+	AsoundDriver driver;
+
+	asound_driver_init(&driver, 0x7d9du);
+	assert(asound_driver_dispatch_sound_offset(&driver, 0x0au));
+
+	collector.count = 0;
+	asound_driver_tick_and_dispatch(&driver,
+	                              0,
+	                              0,
+	                              0,
+	                              callback_collector,
+	                              &collector);
+	assert(collector.count >= 5);
+}
+
 int main(void)
 {
 	test_sample_ranges();
@@ -264,6 +282,7 @@ int main(void)
 	test_driver_dispatch_rejects_unknown_or_odd_offsets();
 	test_tick_and_dispatch_callbacks();
 	test_tick_and_dispatch_without_counter();
+	test_tick_and_dispatch_without_buffer();
 	puts("asound_model tests passed");
 	return 0;
 }

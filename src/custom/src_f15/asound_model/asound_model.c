@@ -637,17 +637,23 @@ void asound_driver_tick_and_dispatch(AsoundDriver* driver,
                                     void* callback_user)
 {
 	size_t count;
-	size_t safe_capacity;
+	size_t sink_capacity;
 	AsoundEvent* sink_events;
 
-	safe_capacity = event_capacity;
-	sink_events = events;
-	if (!sink_events || safe_capacity == 0) {
-		safe_capacity = 0;
-		sink_events = 0;
+	/* Keep callback mode useful even when caller only wants immediate dispatch.
+	 * Use a local scratch buffer so callbacks still receive events.
+	 */
+	if (events == 0 || event_capacity == 0) {
+		static const size_t scratch_capacity = 64;
+		static AsoundEvent scratch_events[64];
+		sink_capacity = scratch_capacity;
+		sink_events = scratch_events;
+	} else {
+		sink_events = events;
+		sink_capacity = event_capacity;
 	}
 
-	count = asound_driver_tick_events(driver, sink_events, safe_capacity);
+	count = asound_driver_tick_events(driver, sink_events, sink_capacity);
 	if (event_count) {
 		*event_count = count;
 	}
