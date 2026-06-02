@@ -9,11 +9,8 @@ extern "C" {
 
 typedef struct AsoundRuntime AsoundRuntime;
 
-typedef void (*AsoundRuntimeOutput)(void* user,
-                                    AsoundEventType type,
-                                    AsoundU8 voice,
-                                    AsoundU16 a,
-                                    AsoundU16 b);
+typedef void (*AsoundRuntimeOutput)(void* user, AsoundEventType type,
+                                    AsoundU8 voice, AsoundU16 a, AsoundU16 b);
 
 struct AsoundRuntime {
 	AsoundDriver core;
@@ -23,29 +20,20 @@ struct AsoundRuntime {
 	AsoundU8 active_variant;
 };
 
-void asound_runtime_init(AsoundRuntime* runtime,
-                        AsoundU16 setup_value,
-                        AsoundRuntimeOutput output,
-                        void* output_user);
+void asound_rt_init(AsoundRuntime* runtime, AsoundU16 setup_value,
+                    AsoundRuntimeOutput output, void* output_user);
+void asound_rt_reset(AsoundRuntime* runtime, AsoundU16 setup_value);
+void asound_rt_shutdown(AsoundRuntime* runtime);
+int asound_rt_dispatch_sound(AsoundRuntime* runtime, AsoundU8 dispatch_offset);
+size_t asound_rt_tick_events(AsoundRuntime* runtime, AsoundEvent* events,
+                             size_t event_capacity);
+size_t asound_rt_tick_and_dispatch(AsoundRuntime* runtime, AsoundEvent* events,
+                                   size_t event_capacity, size_t* event_count);
+void asound_rt_sample_variant_range(AsoundRuntime* runtime, AsoundU16* start,
+                                    AsoundU16* end);
 
-void asound_runtime_reset(AsoundRuntime* runtime, AsoundU16 setup_value);
-void asound_runtime_shutdown(AsoundRuntime* runtime);
-
-int asound_runtime_dispatch_sound(AsoundRuntime* runtime,
-                                 AsoundU8 dispatch_offset);
-
-size_t asound_runtime_tick_events(AsoundRuntime* runtime,
-                                 AsoundEvent* events,
-                                 size_t event_capacity);
-
-size_t asound_runtime_tick_and_dispatch(AsoundRuntime* runtime,
-                                       AsoundEvent* events,
-                                       size_t event_capacity,
-                                       size_t* event_count);
-
-void asound_runtime_sample_variant_range(AsoundRuntime* runtime,
-                                        AsoundU16* start,
-                                        AsoundU16* end);
+/* Short public API for MS C and old toolchains; the `asound_rt_*` prefix is
+   intentionally compact and stable for both DOS and host builds. */
 
 #ifdef __cplusplus
 }

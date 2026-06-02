@@ -92,21 +92,21 @@ int main(int argc, char** argv)
 		}
 	}
 
-	asound_runtime_init(&runtime, (AsoundU16)setup_value, callback, &tick);
+	asound_rt_init(&runtime, (AsoundU16)setup_value, callback, &tick);
 	offset = (AsoundU8)(dispatch_offset & 0xffu);
-	if (!asound_runtime_dispatch_sound(&runtime, offset)) {
+	if (!asound_rt_dispatch_sound(&runtime, offset)) {
 		printf("failed to dispatch sound offset 0x%lx\n", dispatch_offset);
 		return 1;
 	}
 
 	for (tick = 0; tick < ticks; ++tick) {
-		count = asound_runtime_tick_and_dispatch(&runtime, events, 64, 0);
+		count = asound_rt_tick_and_dispatch(&runtime, events, 64, 0);
 		printf("tick %lu produced %lu events\n", tick, (unsigned long)count);
 		if (count == 0 && tick > 0) {
 			break;
 		}
 	}
 
-	asound_runtime_shutdown(&runtime);
+	asound_rt_shutdown(&runtime);
 	return 0;
 }
