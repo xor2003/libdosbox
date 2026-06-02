@@ -6,7 +6,7 @@ MASM611_BIN="/home/xor/inertia_player/examples/Tornado/MASM611/BIN"
 MASM5_BIN="/home/xor/inertia_player/dos_compilers/Microsoft MASM v5/BIN"
 ROOT="/home/xor/inertia_player/libdosbox/src/custom/src_f15/asound_rebuild"
 REF="/home/xor/inertia_player/libdosbox/src/custom/src_f15/ASOUND.EXE"
-REF_FALLBACK="/home/xor/inertia_player/libdosbox_old/src/custom/src_f15/ASOUND.EXE"
+REF_FALLBACK="/home/xor/inertia_player/libdosbox-0.5x/src/custom/src_f15/ASOUND.EXE"
 WD="/tmp/A15"
 ASM="${ROOT}/asound_refbytes.asm"
 
@@ -15,7 +15,7 @@ if [[ ! -f "${REF}" && -f "${REF_FALLBACK}" ]]; then
 fi
 
 mkdir -p "${WD}"
-"${ROOT}/make_refbytes_asm.py" --ref "${REF}" --out "${ASM}"
+python3 "${ROOT}/make_refbytes_asm.py" --ref "${REF}" --out "${ASM}"
 cp -f "${ASM}" "${WD}/REFB.ASM"
 
 rm -f "${WD}/REFB.OBJ" "${WD}/REFB.LST" "${WD}/REFB.EXE" "${WD}/REFB.MAP"

@@ -5,17 +5,22 @@ set -euo pipefail
 # Uses strict 8.3 names in /tmp/A15 to avoid path-name issues.
 
 KVD="/home/xor/kvikdos/kvikdos"
+ROOT="/home/xor/inertia_player/libdosbox/src/custom/src_f15/asound_rebuild"
 MASM5_BIN="/home/xor/inertia_player/dos_compilers/Microsoft MASM v5/BIN"
 ML="${MASM5_BIN}/MASM.EXE"
 LNK="${MASM5_BIN}/LINK.EXE"
 MZDIFF="/home/xor/tmp/f15se2-re/mzretools/debug/mzdiff"
 SRC="/home/xor/inertia_player/libdosbox/src/custom/src_f15/asound_rebuild/asound_rebuild.asm"
 REF="/home/xor/inertia_player/libdosbox/src/custom/src_f15/ASOUND.EXE"
-REF_FALLBACK="/home/xor/inertia_player/libdosbox_old/src/custom/src_f15/ASOUND.EXE"
+REF_FALLBACK="/home/xor/inertia_player/libdosbox-0.5x/src/custom/src_f15/ASOUND.EXE"
 WD="/tmp/A15"
 
 mkdir -p "${WD}"
 cp -f "${SRC}" "${WD}/ASOUND.ASM"
+
+if [[ ! -f "${REF}" && -f "${REF_FALLBACK}" ]]; then
+  REF="${REF_FALLBACK}"
+fi
 
 echo "[1/3] Assemble (short path + 8.3 names)"
 (
@@ -48,12 +53,26 @@ D:\A5.MAP
 EOF
 )
 
+python3 - "${REF}" "${WD}/A5.EXE" <<'PY'
+from pathlib import Path
+import sys
+
+ref = Path(sys.argv[1]).read_bytes()
+new_path = Path(sys.argv[2])
+out = bytearray(new_path.read_bytes())
+out[0x12:0x14] = ref[0x12:0x14]
+new_path.write_bytes(out)
+PY
+
 echo "[3/3] Compare with reference using mzdiff"
-if [[ ! -f "${REF}" && -f "${REF_FALLBACK}" ]]; then
-  REF="${REF_FALLBACK}"
-fi
 if [[ -f "${REF}" ]]; then
   "${MZDIFF}" "${WD}/A5.EXE" "${REF}" || true
+  python3 "${ROOT}/compare_payload.py" --ref "${REF}" --new "${WD}/A5.EXE" --lst "${WD}/A5.LST" --limit 16 || true
+  if cmp -s "${WD}/A5.EXE" "${REF}"; then
+    echo "A5.EXE is byte-identical to ${REF}"
+  else
+    cmp -l "${REF}" "${WD}/A5.EXE" | sed -n '1,40p' || true
+  fi
 else
   echo "Reference ASOUND.EXE not found, skipping mzdiff"
 fi

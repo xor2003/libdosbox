@@ -7,7 +7,7 @@ MASM5_BIN="/home/xor/inertia_player/dos_compilers/Microsoft MASM v5/BIN"
 ROOT="/home/xor/inertia_player/libdosbox/src/custom/src_f15/asound_rebuild"
 SRC="${ROOT}/asound_rebuild.asm"
 REF="/home/xor/inertia_player/libdosbox/src/custom/src_f15/ASOUND.EXE"
-REF_FALLBACK="/home/xor/inertia_player/libdosbox_old/src/custom/src_f15/ASOUND.EXE"
+REF_FALLBACK="/home/xor/inertia_player/libdosbox-0.5x/src/custom/src_f15/ASOUND.EXE"
 WD="/tmp/A15"
 
 if [[ ! -f "${REF}" && -f "${REF_FALLBACK}" ]]; then
@@ -41,7 +41,7 @@ out[0x12:0x14] = ref[0x12:0x14]
 out_path.write_bytes(out)
 PY
 
-"${ROOT}/compare_payload.py" --ref "${REF}" --new "${WD}/AS6L5.EXE" --lst "${WD}/AS6.LST" --limit 16 || true
+python3 "${ROOT}/compare_payload.py" --ref "${REF}" --new "${WD}/AS6L5.EXE" --lst "${WD}/AS6.LST" --limit 16 || true
 
 if cmp -s "${REF}" "${WD}/AS6L5.EXE"; then
   echo "AS6L5.EXE is byte-identical to ${REF}"

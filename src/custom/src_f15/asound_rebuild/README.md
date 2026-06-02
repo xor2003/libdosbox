@@ -50,10 +50,12 @@ The MASM 5 compatibility path is still available:
 ```bash
 bash src/custom/src_f15/asound_rebuild/build_short.sh
 src/custom/src_f15/asound_rebuild/compare_payload.py \
-  --ref /home/xor/inertia_player/libdosbox_old/src/custom/src_f15/ASOUND.EXE \
+  --ref /home/xor/inertia_player/libdosbox-0.5x/src/custom/src_f15/ASOUND.EXE \
   --new /tmp/A15/A5.EXE \
   --lst /tmp/A15/A5.LST
 ```
+
+Note: the short MASM5 compatibility path may differ by a few assembler-introduced padding bytes (`align` directives). `build_short.sh` now copies the `asound_rebuild.asm` source to `/tmp/A15/ASOUND.ASM`, builds with MASM 5 + `kvikdos`, compares payloads, and reports any non-identical regions.
 
 The original F.EXE-derived source was copied to:
 
