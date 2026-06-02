@@ -2,6 +2,24 @@
 
 This directory contains a small C model of selected ASOUND behavior. It is not a replacement driver yet; it is a deterministic test harness for the data structures and bytecode semantics decoded in `../asound_rebuild/asound_rebuild.asm`.
 
+## Callback API
+
+`asound_driver_tick_and_dispatch()` is available for modern C host integration. It:
+
+- ticks the driver into a caller-provided event buffer,
+- returns the number of events emitted,
+- and optionally forwards each event to a callback.
+
+```c
+void callback(void* user, AsoundEventType type, AsoundU8 voice,
+              AsoundU16 a, AsoundU16 b);
+
+AsoundEvent events[32];
+size_t event_count = 0;
+asound_driver_tick_and_dispatch(&driver, events, 32, &event_count,
+                               callback, NULL);
+```
+
 ## Goals
 
 - Keep `../asound_rebuild/asound_rebuild.asm` as the byte-identical oracle.

@@ -590,3 +590,68 @@ void asound_driver_tick(AsoundDriver* driver, AsoundEventLog* log)
 		asound_stream_step(&driver->streams[voice], voice, log);
 	}
 }
+
+size_t asound_driver_tick_events(AsoundDriver* driver,
+                                AsoundEvent* events,
+                                size_t event_capacity)
+{
+	AsoundEventLog log;
+	asound_log_init(&log, events, event_capacity);
+	asound_driver_tick(driver, &log);
+	return log.count;
+}
+
+void asound_event_dispatch(const AsoundEvent* event,
+                          AsoundEventCallback callback,
+                          void* callback_user)
+{
+	if (!event || !callback) {
+		return;
+	}
+	callback(callback_user,
+	         event->type,
+	         event->voice,
+	         event->a,
+	         event->b);
+}
+
+void asound_events_dispatch(const AsoundEvent* events,
+                           size_t event_count,
+                           AsoundEventCallback callback,
+                           void* callback_user)
+{
+	size_t i;
+	if (!callback) {
+		return;
+	}
+	for (i = 0; i < event_count; ++i) {
+		asound_event_dispatch(&events[i], callback, callback_user);
+	}
+}
+
+void asound_driver_tick_and_dispatch(AsoundDriver* driver,
+                                    AsoundEvent* events,
+                                    size_t event_capacity,
+                                    size_t* event_count,
+                                    AsoundEventCallback callback,
+                                    void* callback_user)
+{
+	size_t count;
+	size_t safe_capacity;
+	AsoundEvent* sink_events;
+
+	safe_capacity = event_capacity;
+	sink_events = events;
+	if (!sink_events || safe_capacity == 0) {
+		safe_capacity = 0;
+		sink_events = 0;
+	}
+
+	count = asound_driver_tick_events(driver, sink_events, safe_capacity);
+	if (event_count) {
+		*event_count = count;
+	}
+	if (callback) {
+		asound_events_dispatch(sink_events, count, callback, callback_user);
+	}
+}

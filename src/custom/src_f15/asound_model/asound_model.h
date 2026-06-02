@@ -40,6 +40,12 @@ typedef struct AsoundEventLog {
 	size_t capacity;
 } AsoundEventLog;
 
+typedef void (*AsoundEventCallback)(void* user,
+                                    AsoundEventType type,
+                                    AsoundU8 voice,
+                                    AsoundU16 a,
+                                    AsoundU16 b);
+
 typedef struct SoundStreamState {
 	AsoundU8 ticks_left;
 	AsoundS8 pitch_delta;
@@ -115,6 +121,22 @@ void asound_driver_shutdown(AsoundDriver* driver);
 int asound_driver_dispatch_sound_offset(AsoundDriver* driver,
                                         AsoundU8 dispatch_offset);
 void asound_driver_tick(AsoundDriver* driver, AsoundEventLog* log);
+size_t asound_driver_tick_events(AsoundDriver* driver,
+                                AsoundEvent* events,
+                                size_t event_capacity);
+void asound_driver_tick_and_dispatch(AsoundDriver* driver,
+                                    AsoundEvent* events,
+                                    size_t event_capacity,
+                                    size_t* event_count,
+                                    AsoundEventCallback callback,
+                                    void* callback_user);
+void asound_events_dispatch(const AsoundEvent* events,
+                           size_t event_count,
+                           AsoundEventCallback callback,
+                           void* callback_user);
+void asound_event_dispatch(const AsoundEvent* event,
+                          AsoundEventCallback callback,
+                          void* callback_user);
 
 #ifdef __cplusplus
 }
