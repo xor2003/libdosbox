@@ -28,15 +28,15 @@
 #include "paging.h"
 #include "types.h"
 
-#if defined(HAVE_MMAP)
+#if (HAVE_MMAP)
 #include <sys/mman.h>
 #endif
 
-#if defined(HAVE_PTHREAD_WRITE_PROTECT_NP)
+#if (HAVE_PTHREAD_WRITE_PROTECT_NP)
 #include <pthread.h>
 #endif
 
-#if defined(HAVE_SYS_ICACHE_INVALIDATE)
+#if (HAVE_SYS_ICACHE_INVALIDATE)
 #include <libkern/OSCacheControl.h>
 #endif
 
@@ -894,13 +894,13 @@ static inline void dyn_mem_set_access([[maybe_unused]] void *ptr,
                                       [[maybe_unused]] size_t size,
                                       [[maybe_unused]] const bool execute)
 {
-#if defined(HAVE_PTHREAD_WRITE_PROTECT_NP)
+#if (HAVE_PTHREAD_WRITE_PROTECT_NP)
 #if defined(HAVE_BUILTIN_AVAILABLE)
 	if (__builtin_available(macOS 11.0, *))
 #endif
 		pthread_jit_write_protect_np(execute);
 
-#elif defined(HAVE_MPROTECT)
+#elif (HAVE_MPROTECT)
 	dyn_mem_adjust(ptr, size);
 	const int flags = (execute ? PROT_EXEC : PROT_WRITE) | PROT_READ;
 	[[maybe_unused]] const int mp_res = mprotect(ptr, size, flags);
@@ -942,13 +942,13 @@ static inline void dyn_cache_invalidate([[maybe_unused]] void *ptr,
                                         [[maybe_unused]] size_t size)
 {
 #if defined(C_PER_PAGE_W_OR_X)
-#	if defined(HAVE_BUILTIN_CLEAR_CACHE)
+#	if (HAVE_BUILTIN_CLEAR_CACHE)
 	const auto start     = static_cast<char*>(ptr);
 	const auto start_val = reinterpret_cast<uintptr_t>(start);
 	const auto end_val = start_val + size;
 	const auto end = reinterpret_cast<char *>(end_val);
 	__builtin___clear_cache(start, end);
-#elif defined(HAVE_SYS_ICACHE_INVALIDATE)
+#elif (HAVE_SYS_ICACHE_INVALIDATE)
 #if defined(HAVE_BUILTIN_AVAILABLE)
 	        if (__builtin_available(macOS 11.0, *))
 #endif
@@ -996,10 +996,10 @@ static void cache_init(bool enable) {
 			}
 			assert(lp_vmem);
 			cache_code_start_ptr = static_cast<uint8_t *>(lp_vmem);
-#elif defined(HAVE_MMAP)
+#elif (HAVE_MMAP)
 			int map_flags = MAP_PRIVATE | MAP_ANON;
 			int prot_flags = PROT_READ | PROT_WRITE | PROT_EXEC;
-#if defined(HAVE_MAP_JIT)
+#if (HAVE_MAP_JIT)
 			map_flags |= MAP_JIT;
 #endif
 			cache_code_start_ptr=static_cast<uint8_t *>(mmap(nullptr, cache_code_size, prot_flags, map_flags, -1, 0));

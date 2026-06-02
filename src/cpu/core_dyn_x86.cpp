@@ -33,7 +33,7 @@
 #include <winbase.h>
 #endif
 
-#if defined(HAVE_MPROTECT) || defined(HAVE_MMAP)
+#if (HAVE_MPROTECT) || (HAVE_MMAP)
 #include <sys/mman.h>
 
 #include <climits>
