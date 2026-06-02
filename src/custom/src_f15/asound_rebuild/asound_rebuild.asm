@@ -1408,7 +1408,7 @@ byte_11CDC      db 1                    ; DATA XREF: opl_apply_waveform_flag↓r
                 db    0
                 db    0
                 db    0
-unk_121D6       db    0                 ; DATA XREF: seg127c:054C↓o
+snd_disp_stream_121d6_data       db    0                 ; DATA XREF: seg127c:054C↓o
                 db    3
                 db 0FCh
                 db    2
@@ -1474,7 +1474,7 @@ unk_121D6       db    0                 ; DATA XREF: seg127c:054C↓o
                 db  78h ; x
                 db    0
                 db    0
-unk_12218       db 0FCh                 ; DATA XREF: snd_disp_stream_12218+7↓o
+snd_disp_stream_12218_data       db 0FCh                 ; DATA XREF: snd_disp_stream_12218+7↓o
                 db    4
                 db 0F9h
                 db  39h ; 9
@@ -1486,7 +1486,7 @@ unk_12218       db 0FCh                 ; DATA XREF: snd_disp_stream_12218+7↓o
                 db    0
                 db    0
                 db    0
-unk_12224       db 0FCh                 ; DATA XREF: snd_disp_stream_12224+7↓o
+snd_disp_stream_12224_data       db 0FCh                 ; DATA XREF: snd_disp_stream_12224+7↓o
                 db    5
                 db 0F9h
                 db  34h ; 4
@@ -1511,7 +1511,7 @@ sound_stream_pitch_slide_1222e       db 0FCh                 ; one-shot stream: 
                 db    0
                 db    0
                 db    0
-unk_1223C       db 0FCh                 ; DATA XREF: seg127c:0530↓o
+snd_disp_stream_1223c_data       db 0FCh                 ; DATA XREF: seg127c:0530↓o
                 db    8
                 db 0F9h
                 db  28h ; (
@@ -1521,7 +1521,7 @@ unk_1223C       db 0FCh                 ; DATA XREF: seg127c:0530↓o
                 db  1Eh
                 db    0
                 db    0
-unk_12246       db 0FCh                 ; DATA XREF: seg127c:053E↓o
+snd_disp_stream_12246_data       db 0FCh                 ; DATA XREF: seg127c:053E↓o
                 db    8
                 db 0F9h
                 db  23h ; #
@@ -1531,7 +1531,7 @@ unk_12246       db 0FCh                 ; DATA XREF: seg127c:053E↓o
                 db  1Eh
                 db    0
                 db    0
-unk_12250       db 0FCh                 ; DATA XREF: seg127c:055A↓o
+snd_disp_stream_12250_data       db 0FCh                 ; DATA XREF: seg127c:055A↓o
                 db  0Ch
                 db 0F9h
                 db  35h ; 5
@@ -1539,7 +1539,7 @@ unk_12250       db 0FCh                 ; DATA XREF: seg127c:055A↓o
                 db  7Fh ; 
                 db    0
                 db    0
-unk_12258       db 0FCh                 ; DATA XREF: seg127c:0568↓o
+snd_disp_stream_12258_data       db 0FCh                 ; DATA XREF: seg127c:0568↓o
                 db  0Ah
                 db 0F9h
                 db  3Dh ; =
@@ -1547,7 +1547,7 @@ unk_12258       db 0FCh                 ; DATA XREF: seg127c:0568↓o
                 db  7Fh ; 
                 db    0
                 db    0
-unk_12260       db 0FCh                 ; DATA XREF: seg127c:05A8↓o
+snd_disp_stream_12260_data       db 0FCh                 ; DATA XREF: seg127c:05A8↓o
                 db  0Bh
                 db 0F9h
                 db  2Bh ; +
@@ -1555,7 +1555,7 @@ unk_12260       db 0FCh                 ; DATA XREF: seg127c:05A8↓o
                 db  91h
                 db    0
                 db    0
-unk_12268       db 0FCh                 ; DATA XREF: seg127c:0576↓o
+snd_disp_stream_12268_data       db 0FCh                 ; DATA XREF: seg127c:0576↓o
                 db    0
                 db 0F9h
                 db  36h ; 6
@@ -1565,9 +1565,9 @@ unk_12268       db 0FCh                 ; DATA XREF: seg127c:0576↓o
                 db    8
                 db    0
                 db    0
-unk_12272       db    0                 ; DATA XREF: seg127c:0584↓o
+snd_disp_silence_voice0_data       db    0                 ; DATA XREF: seg127c:0584↓o
                 db    0
-unk_12274       db 0FCh                 ; DATA XREF: seg127c:0599↓o
+snd_disp_stream_12274_data       db 0FCh                 ; DATA XREF: seg127c:0599↓o
                 db  13h
                 db 0F9h
                 db  35h ; 5
@@ -1577,7 +1577,7 @@ unk_12274       db 0FCh                 ; DATA XREF: seg127c:0599↓o
                 db  0Eh
                 db    0
                 db    0
-unk_1227E       db 0FCh                 ; DATA XREF: seg127c:0514↓o
+snd_disp_stream_1227e_data       db 0FCh                 ; DATA XREF: seg127c:0514↓o
                 db    7
                 db 0F9h
                 db  34h ; 4
@@ -1587,7 +1587,7 @@ unk_1227E       db 0FCh                 ; DATA XREF: seg127c:0514↓o
                 db  0Fh
                 db    0
                 db    0
-unk_12288       db 0FCh                 ; DATA XREF: snd_disp_stream_12288+7↓o
+snd_disp_stream_12288_data       db 0FCh                 ; DATA XREF: snd_disp_stream_12288+7↓o
                 db    6
                 db 0F9h
                 db    0
@@ -1605,7 +1605,7 @@ unk_12288       db 0FCh                 ; DATA XREF: snd_disp_stream_12288+7↓o
                 db    0
                 db    0
                 db    0
-unk_1229A       db 0FCh                 ; DATA XREF: seg127c:05C4↓o
+snd_disp_stream_1229a_data       db 0FCh                 ; DATA XREF: seg127c:05C4↓o
                 db    6
                 db 0F9h
                 db  12h
@@ -2589,7 +2589,7 @@ snd_disp_random0_encoded_stream_0      label word
 snd_disp_stream_12218       proc near               ; DATA XREF: seg127c:05E8↓o
                 mov     ax, 0
                 lea     bx, stream_voice0_state
-                lea     cx, unk_12218
+                lea     cx, snd_disp_stream_12218_data
                 jmp     adlib_start_stream
 snd_disp_stream_12218       endp
 
@@ -2600,7 +2600,7 @@ snd_disp_stream_12218       endp
 snd_disp_stream_12224       proc near               ; DATA XREF: seg127c:05F6↓o
                 mov     ax, 0
                 lea     bx, stream_voice0_state
-                lea     cx, unk_12224
+                lea     cx, snd_disp_stream_12224_data
                 jmp     adlib_start_stream
 snd_disp_stream_12224       endp
 
@@ -2609,7 +2609,7 @@ snd_disp_stream_12224       endp
 snd_disp_stream_1227e:                              ; DATA XREF: seg127c:05F0↓o
                 mov     ax, 0
                 lea     bx, stream_voice2_state
-                lea     cx, unk_1227E
+                lea     cx, snd_disp_stream_1227e_data
                 jmp     adlib_start_stream
 ; ---------------------------------------------------------------------------
 
@@ -2623,49 +2623,49 @@ snd_disp_stream_1222e:                              ; DATA XREF: seg127c:05EE↓
 snd_disp_stream_1223c:                              ; DATA XREF: seg127c:05EC↓o
                 mov     ax, 0
                 lea     bx, stream_voice3_state
-                lea     cx, unk_1223C
+                lea     cx, snd_disp_stream_1223c_data
                 jmp     adlib_start_stream
 ; ---------------------------------------------------------------------------
 
 snd_disp_stream_12246:                              ; DATA XREF: seg127c:05EA↓o
                 mov     ax, 0
                 lea     bx, stream_voice3_state
-                lea     cx, unk_12246
+                lea     cx, snd_disp_stream_12246_data
                 jmp     adlib_start_stream
 ; ---------------------------------------------------------------------------
 
 snd_disp_stream_121d6:                              ; DATA XREF: seg127c:0606↓o
                 mov     ax, 0
                 lea     bx, stream_voice0_state
-                lea     cx, unk_121D6
+                lea     cx, snd_disp_stream_121d6_data
                 jmp     adlib_start_stream
 ; ---------------------------------------------------------------------------
 
 snd_disp_stream_12250:                              ; DATA XREF: seg127c:0600↓o
                 mov     ax, 0
                 lea     bx, stream_voice3_state
-                lea     cx, unk_12250
+                lea     cx, snd_disp_stream_12250_data
                 jmp     adlib_start_stream
 ; ---------------------------------------------------------------------------
 
 snd_disp_stream_12258:                              ; DATA XREF: seg127c:05FC↓o
                 mov     ax, 0
                 lea     bx, stream_voice0_state
-                lea     cx, unk_12258
+                lea     cx, snd_disp_stream_12258_data
                 jmp     adlib_start_stream
 ; ---------------------------------------------------------------------------
 
 snd_disp_stream_12268:                              ; DATA XREF: seg127c:0602↓o
                 mov     ax, 0
                 lea     bx, stream_voice0_state
-                lea     cx, unk_12268
+                lea     cx, snd_disp_stream_12268_data
                 jmp     adlib_start_stream
 ; ---------------------------------------------------------------------------
 
 snd_disp_silence_voice0:                              ; DATA XREF: seg127c:05FE↓o
                 mov     ax, 0
                 lea     bx, stream_voice0_state
-                lea     cx, unk_12272
+                lea     cx, snd_disp_silence_voice0_data
                 jmp     adlib_start_stream
 ; ---------------------------------------------------------------------------
 
@@ -2674,7 +2674,7 @@ snd_disp_stream_12274_if_idle:                              ; DATA XREF: seg127c
                 jnz     short locret_12D60
                 mov     ax, 0
                 lea     bx, stream_voice4_state
-                lea     cx, unk_12274
+                lea     cx, snd_disp_stream_12274_data
                 call    adlib_start_stream
 
 locret_12D60:                           ; CODE XREF: seg127c:0590↑j
@@ -2684,7 +2684,7 @@ locret_12D60:                           ; CODE XREF: seg127c:0590↑j
 snd_disp_stream_12260:                              ; DATA XREF: seg127c:05FA↓o
                 mov     ax, 0
                 lea     bx, stream_voice0_state
-                lea     cx, unk_12260
+                lea     cx, snd_disp_stream_12260_data
                 jmp     adlib_start_stream
 
 ; =============== S U B R O U T I N E =======================================
@@ -2693,7 +2693,7 @@ snd_disp_stream_12260:                              ; DATA XREF: seg127c:05FA↓
 snd_disp_stream_12288       proc near               ; DATA XREF: seg127c:05F2↓o
                 mov     ax, 0
                 lea     bx, stream_voice1_state
-                lea     cx, unk_12288
+                lea     cx, snd_disp_stream_12288_data
                 jmp     adlib_start_stream
 snd_disp_stream_12288       endp
 
@@ -2702,7 +2702,7 @@ snd_disp_stream_12288       endp
 snd_disp_stream_1229a:                              ; DATA XREF: seg127c:05F4↓o
                 mov     ax, 0
                 lea     bx, stream_voice2_state
-                lea     cx, unk_1229A
+                lea     cx, snd_disp_stream_1229a_data
                 jmp     adlib_start_stream
 ; ---------------------------------------------------------------------------
 
