@@ -55,7 +55,7 @@ src/custom/src_f15/asound_rebuild/compare_payload.py \
   --lst /tmp/A15/A5.LST
 ```
 
-Note: the short MASM5 compatibility path may differ by a few assembler-introduced padding bytes (`align` directives). `build_short.sh` now copies the `asound_rebuild.asm` source to `/tmp/A15/ASOUND.ASM`, builds with MASM 5 + `kvikdos`, compares payloads, and reports any non-identical regions.
+`build_short.sh` copies the `asound_rebuild.asm` source to `/tmp/A15/ASOUND.ASM`, builds with MASM 5 + `kvikdos`, and compares payload bytes; run output reports any remaining non-identical regions.
 
 The original F.EXE-derived source was copied to:
 

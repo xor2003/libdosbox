@@ -21,7 +21,7 @@ SoundStreamState ends
 seg11a3         segment para public 'DATA' use16
                 assume cs:seg11a3
 aF15IiAdlib3149 db 'F15 II AdLib 3-14-91',0
-                align 4
+                db 0,0,0
                 dw seg seg127c
                 dw seg seg11a3
                 ; Overlay metadata followed by exported seg127c entry offsets.
