@@ -34,6 +34,8 @@ bool complex_self_modifications = false;
 bool collect_rt_info = true;
 // Enable/disable collection of memory access information (slower).
 bool collect_rt_info_vars = true;
+// Enable/disable ABI metadata collection.
+bool abi_collection_mode = false;
 
 // -- configuration end
 
@@ -117,12 +119,13 @@ const RuntimeProfileStrategy *g_active_profile = &k_analysis_profile;
 
 void print_runtime_modes()
 {
-	printf("custom status: profile=%s compare=%d trace=%d trace_stdout=%d collect_rt=%d collect_vars=%d complex_selfmod=%d\n",
+	printf("custom status: profile=%s compare=%d trace=%d trace_stdout=%d collect_rt=%d collect_vars=%d complex_selfmod=%d abi=%d\n",
 	       g_active_profile->name(), compare_mode ? 1 : 0,
 	       trace_instructions ? 1 : 0,
 	       trace_instructions_to_stdout ? 1 : 0,
 	       collect_rt_info ? 1 : 0, collect_rt_info_vars ? 1 : 0,
-	       complex_self_modifications ? 1 : 0);
+	       complex_self_modifications ? 1 : 0,
+	       abi_collection_mode ? 1 : 0);
 }
 
 const RuntimeProfileStrategy *profile_by_id(RuntimeProfile p)
@@ -229,6 +232,16 @@ void toggle_complex_self_modifications_mode(bool pressed)
 	print_runtime_modes();
 }
 
+void toggle_abi_collection_mode(bool pressed)
+{
+	if (!pressed)
+		return;
+	abi_collection_mode = !abi_collection_mode;
+	printf("custom option: abi_collection_mode=%d\n",
+	       abi_collection_mode ? 1 : 0);
+	print_runtime_modes();
+}
+
 void print_runtime_modes_hotkey(bool pressed)
 {
 	if (!pressed)
@@ -244,6 +257,12 @@ extern Bitu DasmI386(char *buffer, PhysPt pc, Bitu cur_ip, bool bit32);
 namespace m2c {
 extern size_t debug;
 extern void load_drivers();
+void abi_record_call_boundary(dd callee_linear,
+                              const CPU_Regs &before_regs,
+                              const Segments &before_segs,
+                              const CPU_Regs &after_regs,
+                              const Segments &after_segs,
+                              dw stack_cleanup_bytes);
 } // namespace m2c
 
 // Size of the memory region to compare for instruction tracing.
@@ -348,8 +367,81 @@ namespace m2c {
 bool defered_irqs = false;
 // Name of the executable being run.
 std::string exename;
+// Runtime EXE load segment selected by DOSBox.
+dw runtime_loadseg = 0;
 // Function to print collected traces.
 static void print_traces();
+
+struct AbiSummary {
+	uint32_t calls = 0;
+	uint32_t changed_mask = 0;
+	uint32_t preserved_mask = 0xFFFF;
+	uint32_t ret_mask = 0;
+	uint32_t stack_cleanup_bytes = 0;
+};
+
+static std::unordered_map<dd, AbiSummary> abi_summary;
+
+static uint32_t compute_runtime_image_size_bytes()
+{
+	const dw psp_seg = dos.psp();
+	if (!psp_seg || runtime_loadseg < (psp_seg + 0x10)) {
+		return 0;
+	}
+	const dw psp_mem_end_seg = *(dw *)(((db *)&m2c::m) + psp_seg * 0x10 + 2);
+	if (psp_mem_end_seg <= runtime_loadseg) {
+		return 0;
+	}
+	const uint32_t size = static_cast<uint32_t>(psp_mem_end_seg - runtime_loadseg) * 0x10u;
+	return size;
+}
+
+static inline uint32_t regs_changed_mask(const CPU_Regs &before,
+                                         const CPU_Regs &after)
+{
+	uint32_t mask = 0;
+	for (int i = 0; i < 8; ++i) {
+		if (before.regs[i].dword[0] != after.regs[i].dword[0]) {
+			mask |= (1u << i);
+		}
+	}
+	return mask;
+}
+
+static std::vector<std::string> mask_to_reg_names(uint32_t mask)
+{
+	static const char *k_names[8] = {"AX", "CX", "DX", "BX",
+	                                  "SP", "BP", "SI", "DI"};
+	std::vector<std::string> out;
+	for (int i = 0; i < 8; ++i) {
+		if (mask & (1u << i)) {
+			out.emplace_back(k_names[i]);
+		}
+	}
+	return out;
+}
+
+void abi_record_call_boundary(dd callee_linear,
+                              const CPU_Regs &before_regs,
+                              const Segments &before_segs,
+                              const CPU_Regs &after_regs,
+                              const Segments &after_segs,
+                              dw stack_cleanup_bytes)
+{
+	(void)before_segs;
+	(void)after_segs;
+	if (!abi_collection_mode || callee_linear == 0)
+		return;
+
+	AbiSummary &s = abi_summary[callee_linear];
+	++s.calls;
+	const uint32_t changed = regs_changed_mask(before_regs, after_regs);
+	s.changed_mask |= changed;
+	s.preserved_mask &= ~changed;
+	// Heuristic return regs in 16-bit style.
+	s.ret_mask |= changed & ((1u << 0) | (1u << 2)); // AX,DX
+	s.stack_cleanup_bytes = stack_cleanup_bytes;
+}
 
 // Function to dump the stack and shadow memory.
 void stackDumpZ()
@@ -440,7 +532,14 @@ int custom_callf(Bitu CS, Bitu IP)
 		// Dispatch the call to the translated function.
 		m2c::_STATE _state;
 		_state.call_source = 3;
-		return __dispatch_call((CS << 16) + IP, &_state);
+		const CPU_Regs abi_before_regs = cpu_regs;
+		const Segments abi_before_segs = Segs;
+		const dw abi_old_sp = sp;
+		const int ret = __dispatch_call((CS << 16) + IP, &_state);
+		m2c::abi_record_call_boundary((CS << 4) + IP, abi_before_regs,
+		                              abi_before_segs, cpu_regs, Segs,
+		                              static_cast<dw>(sp - abi_old_sp));
+		return ret;
 	}
 
 	return 0;
@@ -497,6 +596,8 @@ void custom_init(Section *sec)
 	MAPPER_AddHandler(toggle_complex_self_modifications_mode,
 	                  SDL_SCANCODE_6, PRIMARY_MOD, "custsm_t",
 	                  "Toggle complex selfmod");
+	MAPPER_AddHandler(toggle_abi_collection_mode, SDL_SCANCODE_7,
+	                  PRIMARY_MOD, "custabi_t", "Toggle ABI collect");
 	MAPPER_AddHandler(print_runtime_modes_hotkey, SDL_SCANCODE_0,
 	                  PRIMARY_MOD, "custstat", "Custom status");
 	set_runtime_profile(RuntimeProfile::Analysis);
@@ -517,6 +618,7 @@ void custom_init_entrypoint(char *name, uint16_t loadseg)
 	 * 3. Start instruction tracing
 	 */
 	m2c::dumpexe_start_hook(loadseg); // Start execution hook
+	m2c::runtime_loadseg = loadseg;
 
 	// Check if it's a target binary and if initialization is complete.
 	if (!custom_runs)
@@ -1725,6 +1827,7 @@ void ShadowMemory::dump()
 	m_data.clear();
 	m_code.clear();
 	m_jumps.clear();
+	abi_summary.clear();
 	//       printf("%s\n",j.dump(3).c_str());
 }
 
@@ -1792,6 +1895,21 @@ void to_json(nlohmann::json &nlohmann_json_j, const ShadowMemory &nlohmann_json_
 		nlohmann_json_j["Data"][int_to_hex(key)] = *d;
 	}
 	nlohmann_json_j["Jumps"] = nlohmann_json_t.m_jumps;
+	nlohmann_json_j["Meta"]["DosboxLoadSeg"] = runtime_loadseg;
+	nlohmann_json_j["Meta"]["ImageSizeBytes"] = compute_runtime_image_size_bytes();
+	for (const auto &[addr, s] : abi_summary) {
+		nlohmann::json abi_j;
+		abi_j["Calls"] = s.calls;
+		abi_j["InRegs"] = mask_to_reg_names(s.changed_mask | s.preserved_mask);
+		abi_j["OutRegs"] = mask_to_reg_names(s.ret_mask);
+		abi_j["Clobbers"] = mask_to_reg_names(s.changed_mask);
+		abi_j["Preserved"] = mask_to_reg_names(s.preserved_mask);
+		abi_j["RetRegs"] = mask_to_reg_names(s.ret_mask);
+		abi_j["StackCleanup"] = s.stack_cleanup_bytes;
+		abi_j["CallConv"] = (s.stack_cleanup_bytes != 0) ? "stdcall?" : "cdecl?";
+		abi_j["Confidence"] = (s.calls >= 3) ? "medium" : "low";
+		nlohmann_json_j["Abi"][int_to_hex(addr)] = abi_j;
+	}
 }
 
 } // namespace m2c

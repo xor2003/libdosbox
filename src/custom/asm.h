@@ -152,6 +152,13 @@ extern void log_regs_dbx(const char *file,
                          const char *instr,
                          const CPU_Regs &r,
                          const Segments &s);
+extern bool abi_collection_mode;
+extern void abi_record_call_boundary(dd callee_linear,
+                                     const CPU_Regs &before_regs,
+                                     const Segments &before_segs,
+                                     const CPU_Regs &after_regs,
+                                     const Segments &after_segs,
+                                     dw stack_cleanup_bytes);
 
 extern void execute_irqs();
 void run_hw_interrupts();
@@ -2223,6 +2230,8 @@ static bool CALL_(m2cf *label, struct _STATE *_state, _offsets _i = 0)
 		eip += inst_size(cs, eip);
 #endif
 	dw oldsp = sp;
+	CPU_Regs abi_before_regs = cpu_regs;
+	Segments abi_before_segs = Segs;
 	PUSH(return_addr);
 
 #if M2CDEBUG > 0
@@ -2261,6 +2270,13 @@ static bool CALL_(m2cf *label, struct _STATE *_state, _offsets _i = 0)
 #endif
 			last_ip = cpu_regs.ip.dword[0];
 		}
+	}
+	if (abi_collection_mode && _i) {
+		const dd callee_linear = static_cast<dd>(_i);
+		const dw cleanup = static_cast<dw>(sp - oldsp);
+		abi_record_call_boundary(callee_linear, abi_before_regs,
+		                         abi_before_segs, cpu_regs, Segs,
+		                         cleanup);
 	}
 	return true;
 }
