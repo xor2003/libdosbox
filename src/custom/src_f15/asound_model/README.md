@@ -39,6 +39,26 @@ asound_driver_tick_and_dispatch(&driver, events, 32, &event_count,
 
 The two random dispatch entries at byte offsets `00h` and `02h` are now modeled as seed-indexed random stream selectors.
 
+## Runtime Driver Wrapper
+
+`asound_runtime.[ch]` adds a compact API intended for modern host integration:
+
+- initialize/reset/shutdown an `AsoundRuntime`
+- dispatch sound offsets through `asound_runtime_dispatch_sound()`
+- tick and retrieve event batches
+- dispatch events to an output callback for backends
+- query sample variant ranges for sample-player integration
+
+```c
+AsoundRuntime runtime;
+AsoundEvent events[32];
+size_t event_count = 0;
+
+asound_runtime_init(&runtime, 0x7d9d, callback, NULL);
+asound_runtime_dispatch_sound(&runtime, 0x0au);
+asound_runtime_tick_and_dispatch(&runtime, events, 32, &event_count);
+```
+
 ## Run Tests
 
 ```bash

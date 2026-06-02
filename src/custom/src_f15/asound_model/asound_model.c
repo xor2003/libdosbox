@@ -21,7 +21,7 @@ const AsoundU8 asound_stream_121d6[] = {
         0x00u,
 };
 
-const AsoundU8 asound_stream_random2_voice2_07a8[] = {
+const AsoundU8 asound_stream_r2v2_07a8[] = {
         0xfcu,
         0x02u,
         0xf9u,
@@ -32,7 +32,7 @@ const AsoundU8 asound_stream_random2_voice2_07a8[] = {
         0x00u,
 };
 
-const AsoundU8 asound_stream_random2_voice2_07b0[] = {
+const AsoundU8 asound_stream_r2v2_07b0[] = {
         0xfcu,
         0x14u,
         0xf9u,
@@ -43,7 +43,7 @@ const AsoundU8 asound_stream_random2_voice2_07b0[] = {
         0x00u,
 };
 
-const AsoundU8 asound_stream_random2_voice2_07b8[] = {
+const AsoundU8 asound_stream_r2v2_07b8[] = {
         0xfcu,
         0x16u,
         0xf9u,
@@ -54,7 +54,7 @@ const AsoundU8 asound_stream_random2_voice2_07b8[] = {
         0x00u,
 };
 
-const AsoundU8 asound_stream_random2_voice2_07c0[] = {
+const AsoundU8 asound_stream_r2v2_07c0[] = {
         0xfcu,
         0x18u,
         0xf9u,
@@ -65,7 +65,7 @@ const AsoundU8 asound_stream_random2_voice2_07c0[] = {
         0x00u,
 };
 
-const AsoundU8 asound_stream_random0_voice0_07c8[] = {
+const AsoundU8 asound_stream_r0v0_07c8[] = {
         0xfcu,
         0x03u,
         0xf9u,
@@ -76,7 +76,7 @@ const AsoundU8 asound_stream_random0_voice0_07c8[] = {
         0x00u,
 };
 
-const AsoundU8 asound_stream_random0_voice0_07d0[] = {
+const AsoundU8 asound_stream_r0v0_07d0[] = {
         0xfcu,
         0x15u,
         0xf9u,
@@ -87,7 +87,7 @@ const AsoundU8 asound_stream_random0_voice0_07d0[] = {
         0x00u,
 };
 
-const AsoundU8 asound_stream_random0_voice0_07d8[] = {
+const AsoundU8 asound_stream_r0v0_07d8[] = {
         0xfcu,
         0x17u,
         0xf9u,
@@ -98,7 +98,7 @@ const AsoundU8 asound_stream_random0_voice0_07d8[] = {
         0x00u,
 };
 
-const AsoundU8 asound_stream_random0_voice0_07e0[] = {
+const AsoundU8 asound_stream_r0v0_07e0[] = {
         0xfcu,
         0x19u,
         0xf9u,
@@ -520,7 +520,7 @@ static void start_stream(AsoundDriver* driver, AsoundU8 voice, const AsoundU8* s
 	}
 }
 
-int asound_driver_dispatch_sound_offset(AsoundDriver* driver, AsoundU8 dispatch_offset)
+int asound_driver_dispatch_sound(AsoundDriver* driver, AsoundU8 dispatch_offset)
 {
 	AsoundU8 dispatch_index;
 	if (!driver || (dispatch_offset & 1u) != 0 || dispatch_offset > 0x22u) {
@@ -532,10 +532,10 @@ int asound_driver_dispatch_sound_offset(AsoundDriver* driver, AsoundU8 dispatch_
 	case 0: {
 		const AsoundU8* stream;
 		switch (random_stream_index(driver->random_seed, 3u)) {
-		case 0u: stream = asound_stream_random0_voice0_07c8; break;
-		case 1u: stream = asound_stream_random0_voice0_07d0; break;
-		case 2u: stream = asound_stream_random0_voice0_07d8; break;
-		default: stream = asound_stream_random0_voice0_07e0; break;
+		case 0u: stream = asound_stream_r0v0_07c8; break;
+		case 1u: stream = asound_stream_r0v0_07d0; break;
+		case 2u: stream = asound_stream_r0v0_07d8; break;
+		default: stream = asound_stream_r0v0_07e0; break;
 		}
 		start_stream(driver, 0, stream);
 		return 1;
@@ -543,10 +543,10 @@ int asound_driver_dispatch_sound_offset(AsoundDriver* driver, AsoundU8 dispatch_
 	case 1: {
 		const AsoundU8* stream;
 		switch (random_stream_index(driver->random_seed, 2u)) {
-		case 0u: stream = asound_stream_random2_voice2_07a8; break;
-		case 1u: stream = asound_stream_random2_voice2_07b0; break;
-		case 2u: stream = asound_stream_random2_voice2_07b8; break;
-		default: stream = asound_stream_random2_voice2_07c0; break;
+		case 0u: stream = asound_stream_r2v2_07a8; break;
+		case 1u: stream = asound_stream_r2v2_07b0; break;
+		case 2u: stream = asound_stream_r2v2_07b8; break;
+		default: stream = asound_stream_r2v2_07c0; break;
 		}
 		start_stream(driver, 2, stream);
 		return 1;

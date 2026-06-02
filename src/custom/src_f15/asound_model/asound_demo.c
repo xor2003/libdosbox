@@ -118,7 +118,7 @@ int main(int argc, char** argv)
 	state.last_voice_instrument[5] = 0u;
 
 	asound_driver_init(&driver, (AsoundU16)setup_value);
-	if (!asound_driver_dispatch_sound_offset(&driver, dispatch_offset)) {
+	if (!asound_driver_dispatch_sound(&driver, dispatch_offset)) {
 		fprintf(stderr, "failed to dispatch offset 0x%lx\n", dispatch_value);
 		return 1;
 	}

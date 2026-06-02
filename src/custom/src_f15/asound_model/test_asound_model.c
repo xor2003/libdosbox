@@ -107,7 +107,7 @@ static void test_driver_dispatch_pitch_slide(void)
 	asound_log_init(&log, events, 16);
 	asound_driver_init(&driver, 0x7d9du);
 
-	assert(asound_driver_dispatch_sound_offset(&driver, 0x0au));
+	assert(asound_driver_dispatch_sound(&driver, 0x0au));
 	assert(driver.streams[3].stream_ptr == asound_stream_pitch_slide_1222e);
 
 	asound_driver_tick(&driver, &log);
@@ -125,7 +125,7 @@ static void test_driver_dispatch_dual_stream(void)
 	asound_log_init(&log, events, 16);
 	asound_driver_init(&driver, 0);
 
-	assert(asound_driver_dispatch_sound_offset(&driver, 0x20u));
+	assert(asound_driver_dispatch_sound(&driver, 0x20u));
 	assert(driver.streams[1].stream_ptr == asound_stream_122ac);
 	assert(driver.streams[3].stream_ptr == asound_stream_122b4);
 
@@ -147,8 +147,8 @@ static void test_driver_dispatch_random_streams(void)
 	asound_driver_init(&driver, 0);
 
 	driver.random_seed = 0x0000u;
-	assert(asound_driver_dispatch_sound_offset(&driver, 0x00u));
-	assert(driver.streams[0].stream_ptr == asound_stream_random0_voice0_07c8);
+	assert(asound_driver_dispatch_sound(&driver, 0x00u));
+	assert(driver.streams[0].stream_ptr == asound_stream_r0v0_07c8);
 	assert(driver.streams[0].ticks_left == 1u);
 	asound_driver_tick(&driver, &log);
 	expect_event(&log, 0, ASOUND_EVENT_INSTRUMENT, 0, 0x03u, 0);
@@ -158,14 +158,14 @@ static void test_driver_dispatch_random_streams(void)
 	asound_log_init(&log, events, 16);
 	asound_driver_init(&driver, 0);
 	driver.random_seed = 0x1234u;
-	assert(asound_driver_dispatch_sound_offset(&driver, 0x00u));
-	assert(driver.streams[0].stream_ptr == asound_stream_random0_voice0_07e0);
+	assert(asound_driver_dispatch_sound(&driver, 0x00u));
+	assert(driver.streams[0].stream_ptr == asound_stream_r0v0_07e0);
 
 	asound_log_init(&log, events, 16);
 	asound_driver_init(&driver, 0);
 	driver.random_seed = 0x0000u;
-	assert(asound_driver_dispatch_sound_offset(&driver, 0x02u));
-	assert(driver.streams[2].stream_ptr == asound_stream_random2_voice2_07a8);
+	assert(asound_driver_dispatch_sound(&driver, 0x02u));
+	assert(driver.streams[2].stream_ptr == asound_stream_r2v2_07a8);
 	asound_driver_tick(&driver, &log);
 	expect_event(&log, 0, ASOUND_EVENT_INSTRUMENT, 2, 0x02u, 0);
 	expect_event(&log, 1, ASOUND_EVENT_VOLUME, 2, 0x3eu, 0);
@@ -177,11 +177,11 @@ static void test_driver_dispatch_idle_guard(void)
 	AsoundDriver driver;
 
 	asound_driver_init(&driver, 0);
-	assert(asound_driver_dispatch_sound_offset(&driver, 0x14u));
+	assert(asound_driver_dispatch_sound(&driver, 0x14u));
 	assert(driver.streams[4].stream_ptr == asound_stream_12274);
 	driver.streams[4].stream_pos = 5;
 
-	assert(asound_driver_dispatch_sound_offset(&driver, 0x14u));
+	assert(asound_driver_dispatch_sound(&driver, 0x14u));
 	assert(driver.streams[4].stream_pos == 5);
 }
 
@@ -190,9 +190,9 @@ static void test_driver_dispatch_rejects_unknown_or_odd_offsets(void)
 	AsoundDriver driver;
 
 	asound_driver_init(&driver, 0);
-	assert(!asound_driver_dispatch_sound_offset(&driver, 0x01u));
-	assert(!asound_driver_dispatch_sound_offset(&driver, 0x24u));
-	assert(!asound_driver_dispatch_sound_offset(&driver, 0x23u));
+	assert(!asound_driver_dispatch_sound(&driver, 0x01u));
+	assert(!asound_driver_dispatch_sound(&driver, 0x24u));
+	assert(!asound_driver_dispatch_sound(&driver, 0x23u));
 }
 
 static void test_tick_and_dispatch_callbacks(void)
@@ -204,7 +204,7 @@ static void test_tick_and_dispatch_callbacks(void)
 	AsoundDriver driver;
 
 	asound_driver_init(&driver, 0x7d9du);
-	assert(asound_driver_dispatch_sound_offset(&driver, 0x0au));
+	assert(asound_driver_dispatch_sound(&driver, 0x0au));
 
 	collector.count = 0;
 	asound_driver_tick_and_dispatch(&driver,
@@ -240,7 +240,7 @@ static void test_tick_and_dispatch_without_counter(void)
 	AsoundDriver driver;
 
 	asound_driver_init(&driver, 0x7d9du);
-	assert(asound_driver_dispatch_sound_offset(&driver, 0x0au));
+	assert(asound_driver_dispatch_sound(&driver, 0x0au));
 
 	collector.count = 0;
 	asound_driver_tick_and_dispatch(&driver,
@@ -258,7 +258,7 @@ static void test_tick_and_dispatch_without_buffer(void)
 	AsoundDriver driver;
 
 	asound_driver_init(&driver, 0x7d9du);
-	assert(asound_driver_dispatch_sound_offset(&driver, 0x0au));
+	assert(asound_driver_dispatch_sound(&driver, 0x0au));
 
 	collector.count = 0;
 	asound_driver_tick_and_dispatch(&driver,

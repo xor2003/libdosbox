@@ -80,14 +80,14 @@ typedef struct AsoundDriver {
 
 extern const SampleRange asound_sample_variant_ranges[ASOUND_SAMPLE_VARIANT_COUNT];
 extern const AsoundU8 asound_stream_121d6[];
-extern const AsoundU8 asound_stream_random2_voice2_07a8[];
-extern const AsoundU8 asound_stream_random2_voice2_07b0[];
-extern const AsoundU8 asound_stream_random2_voice2_07b8[];
-extern const AsoundU8 asound_stream_random2_voice2_07c0[];
-extern const AsoundU8 asound_stream_random0_voice0_07c8[];
-extern const AsoundU8 asound_stream_random0_voice0_07d0[];
-extern const AsoundU8 asound_stream_random0_voice0_07d8[];
-extern const AsoundU8 asound_stream_random0_voice0_07e0[];
+extern const AsoundU8 asound_stream_r2v2_07a8[];
+extern const AsoundU8 asound_stream_r2v2_07b0[];
+extern const AsoundU8 asound_stream_r2v2_07b8[];
+extern const AsoundU8 asound_stream_r2v2_07c0[];
+extern const AsoundU8 asound_stream_r0v0_07c8[];
+extern const AsoundU8 asound_stream_r0v0_07d0[];
+extern const AsoundU8 asound_stream_r0v0_07d8[];
+extern const AsoundU8 asound_stream_r0v0_07e0[];
 extern const AsoundU8 asound_stream_12218[];
 extern const AsoundU8 asound_stream_12224[];
 extern const AsoundU8 asound_stream_pitch_slide_1222e[];
@@ -118,7 +118,7 @@ SampleRange asound_sample_variant_range(AsoundU8 index);
 
 void asound_driver_init(AsoundDriver* driver, AsoundU16 setup_value);
 void asound_driver_shutdown(AsoundDriver* driver);
-int asound_driver_dispatch_sound_offset(AsoundDriver* driver,
+int asound_driver_dispatch_sound(AsoundDriver* driver,
                                         AsoundU8 dispatch_offset);
 void asound_driver_tick(AsoundDriver* driver, AsoundEventLog* log);
 size_t asound_driver_tick_events(AsoundDriver* driver,
