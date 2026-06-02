@@ -19,4 +19,11 @@ target_link_libraries(libmidi PRIVATE
 		$<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
 		MT32Emu::mt32emu
 		FluidSynth::libfluidsynth
+		iir::iir
 )
+
+if (C_ALSA)
+	target_link_libraries(libmidi PRIVATE
+		$<TARGET_NAME_IF_EXISTS:PkgConfig::Alsa>
+	)
+endif()

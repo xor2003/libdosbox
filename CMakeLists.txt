@@ -134,6 +134,37 @@ setConfig01(C_HAS_BUILTIN_EXPECT OFF)   # Needs porting to `[[likely]]` and frie
 
 # TODO: Check other functions
 check_symbol_exists(strnlen "string.h" HAVE_STRNLEN)
+check_symbol_exists(mmap "sys/mman.h" HAVE_MMAP)
+check_symbol_exists(mprotect "sys/mman.h" HAVE_MPROTECT)
+check_symbol_exists("__builtin___clear_cache" "" HAVE_BUILTIN_CLEAR_CACHE)
+check_symbol_exists(pthread_jit_write_protect_np "pthread.h" HAVE_PTHREAD_WRITE_PROTECT_NP)
+check_symbol_exists(sys_icache_invalidate "sys/cachectl.h" HAVE_SYS_ICACHE_INVALIDATE)
+
+if (HAVE_MMAP)
+	setConfig01(HAVE_MMAP ON)
+else()
+	setConfig01(HAVE_MMAP OFF)
+endif()
+if (HAVE_MPROTECT)
+	setConfig01(HAVE_MPROTECT ON)
+else()
+	setConfig01(HAVE_MPROTECT OFF)
+endif()
+if (HAVE_BUILTIN_CLEAR_CACHE)
+	setConfig01(HAVE_BUILTIN_CLEAR_CACHE ON)
+else()
+	setConfig01(HAVE_BUILTIN_CLEAR_CACHE OFF)
+endif()
+if (HAVE_PTHREAD_WRITE_PROTECT_NP)
+	setConfig01(HAVE_PTHREAD_WRITE_PROTECT_NP ON)
+else()
+	setConfig01(HAVE_PTHREAD_WRITE_PROTECT_NP OFF)
+endif()
+if (HAVE_SYS_ICACHE_INVALIDATE)
+	setConfig01(HAVE_SYS_ICACHE_INVALIDATE ON)
+else()
+	setConfig01(HAVE_SYS_ICACHE_INVALIDATE OFF)
+endif()
 
 set(_USE_MATH_DEFINES ON)
 set(CUSTOM_DATADIR " ")
@@ -161,13 +192,56 @@ add_custom_target(copy_assets
 add_dependencies(dosbox copy_assets)
 
 find_package(PkgConfig REQUIRED)
+if (DOSBOX_PLATFORM_LINUX)
+	pkg_check_modules(Alsa IMPORTED_TARGET alsa)
+endif()
 
 find_package(SDL2 CONFIG REQUIRED)
+find_package(iir CONFIG REQUIRED)
+find_package(SDL2_net CONFIG REQUIRED)
 
 #find_package(Tracy CONFIG REQUIRED)
 #target_link_libraries(dosbox PRIVATE Tracy::TracyClient)
 
 include_directories(include ${CMAKE_CURRENT_BINARY_DIR}/include)
+get_target_property(_IIR_INCLUDE_DIRS iir::iir INTERFACE_INCLUDE_DIRECTORIES)
+if (NOT "${_IIR_INCLUDE_DIRS}" STREQUAL "_IIR_INCLUDE_DIRS-NOTFOUND" AND _IIR_INCLUDE_DIRS)
+	include_directories(${_IIR_INCLUDE_DIRS})
+endif()
+
+get_target_property(_SDL2_INCLUDE_DIRS SDL2::SDL2 INTERFACE_INCLUDE_DIRECTORIES)
+if (NOT "${_SDL2_INCLUDE_DIRS}" STREQUAL "_SDL2_INCLUDE_DIRS-NOTFOUND" AND _SDL2_INCLUDE_DIRS)
+	include_directories(${_SDL2_INCLUDE_DIRS})
+	set(_SDL2_PARENT_INCLUDE_DIRS "")
+	foreach (_DIR IN LISTS _SDL2_INCLUDE_DIRS)
+		get_filename_component(_SDL2_PARENT "${_DIR}" DIRECTORY)
+		if (IS_DIRECTORY "${_SDL2_PARENT}")
+			list(APPEND _SDL2_PARENT_INCLUDE_DIRS "${_SDL2_PARENT}")
+		endif()
+	endforeach()
+	if (_SDL2_PARENT_INCLUDE_DIRS)
+		list(REMOVE_DUPLICATES _SDL2_PARENT_INCLUDE_DIRS)
+		include_directories(${_SDL2_PARENT_INCLUDE_DIRS})
+	endif()
+endif()
+
+get_target_property(_SDL2_NET_INCLUDE_DIRS SDL2_net::SDL2_net INTERFACE_INCLUDE_DIRECTORIES)
+if (NOT "${_SDL2_NET_INCLUDE_DIRS}" STREQUAL "_SDL2_NET_INCLUDE_DIRS-NOTFOUND" AND _SDL2_NET_INCLUDE_DIRS)
+	include_directories(${_SDL2_NET_INCLUDE_DIRS})
+	set(_SDL2_NET_PARENT_INCLUDE_DIRS "")
+	foreach (_DIR IN LISTS _SDL2_NET_INCLUDE_DIRS)
+		get_filename_component(_SDL2_NET_PARENT "${_DIR}" DIRECTORY)
+		if (IS_DIRECTORY "${_SDL2_NET_PARENT}")
+			list(APPEND _SDL2_NET_PARENT_INCLUDE_DIRS "${_SDL2_NET_PARENT}")
+		endif()
+	endforeach()
+	if (_SDL2_NET_PARENT_INCLUDE_DIRS)
+		list(REMOVE_DUPLICATES _SDL2_NET_PARENT_INCLUDE_DIRS)
+		include_directories(${_SDL2_NET_PARENT_INCLUDE_DIRS})
+	else()
+		include_directories(${_SDL2_NET_INCLUDE_DIRS})
+	endif()
+endif()
 
 add_subdirectory(src)
 
@@ -176,8 +250,11 @@ target_link_libraries(dosbox PRIVATE
 		$<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
 
 		libcapture
-		libmisc
 		libcpu
 		libdos
 		libfpu
+		libgui
+		libmisc
+		libmidi
+		libhardware
 )
