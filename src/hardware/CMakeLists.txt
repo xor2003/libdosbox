@@ -82,6 +82,13 @@ pkg_check_modules(SPEEXDSP REQUIRED IMPORTED_TARGET speexdsp)
 find_package(iir CONFIG REQUIRED)
 find_package(SDL2_net CONFIG REQUIRED)
 
+if (TARGET SDL2::SDL2)
+	get_target_property(_SDL2_INCLUDE_DIRS SDL2::SDL2 INTERFACE_INCLUDE_DIRECTORIES)
+	if (NOT "${_SDL2_INCLUDE_DIRS}" STREQUAL "_SDL2_INCLUDE_DIRS-NOTFOUND" AND _SDL2_INCLUDE_DIRS)
+		target_include_directories(libhardware PRIVATE ${_SDL2_INCLUDE_DIRS})
+	endif()
+endif()
+
 target_link_libraries(libhardware PRIVATE
 		libesfmu
 		libresidfp

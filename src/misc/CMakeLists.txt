@@ -18,3 +18,4 @@ add_library(libmisc STATIC
 )
 
 target_link_libraries(libmisc PRIVATE libwhereami $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>)
+target_link_libraries(libmisc PRIVATE iir::iir)
