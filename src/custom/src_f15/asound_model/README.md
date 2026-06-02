@@ -27,7 +27,7 @@ The two random dispatch entries at byte offsets `00h` and `02h` are now modeled 
 src/custom/src_f15/asound_model/run_tests.sh
 ```
 
-The test binary is built in `/tmp/asound_model_tests` and is independent from the main DOSBox test suite.
+The test binaries are built in `/tmp/asound_model_tests` (default compiler) and `/tmp/asound_model_tests_clang` (if `clang` exists), and are independent from the main DOSBox test suite.
 
 ## Next Steps
 
