@@ -6,9 +6,17 @@ import argparse
 from typing import Any
 
 image_size = 939072 - 0xa40  # 0x22b90 - 0x200  # .exe size - exe header
-dosbox_load_seg = 0x1a2  # para
+dosbox_load_seg = 0x1A2  # Runtime load segment (fallback)
 ida_load_seg = 0x1000
 all_segs = set()
+
+
+def _idc_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("\"", "\\\"")
+
+
+def _hex_addr(value: int) -> str:
+    return f"0x{value:x}"
 
 
 def addr_dbx2ida(addr: int) -> int:
@@ -17,6 +25,26 @@ def addr_dbx2ida(addr: int) -> int:
 
 def seg_dbx2ida(seg: int) -> int:
     return seg + ida_load_seg - dosbox_load_seg
+
+
+def configure_load_segments(meta: dict[str, Any], ida_seg: int) -> None:
+    global dosbox_load_seg, ida_load_seg, image_size
+    ida_load_seg = ida_seg
+    if not isinstance(meta, dict):
+        return
+    runtime_seg = meta.get("DosboxLoadSeg")
+    if runtime_seg is None:
+        return
+    try:
+        dosbox_load_seg = int(runtime_seg)
+    except Exception:
+        pass
+    runtime_image_size = meta.get("ImageSizeBytes")
+    if runtime_image_size is not None:
+        try:
+            image_size = int(runtime_image_size)
+        except Exception:
+            pass
 
 
 def read_segments_map(file_name):
@@ -103,6 +131,21 @@ def infer_data_type(data: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _flow_tags(mask: int) -> list[str]:
+    tags: list[str] = []
+    if mask & (1 << 0):
+        tags.append("JMP")
+    if mask & (1 << 1):
+        tags.append("CALL")
+    if mask & (1 << 2):
+        tags.append("RET")
+    if mask & (1 << 3):
+        tags.append("JCC")
+    if not tags:
+        tags.append("FLOW")
+    return tags
+
+
 def mark_data_access(j, outfile):
     """Processes the data segments, setting variable sizes."""
     for daddr, data in j['Data'].items():
@@ -118,9 +161,12 @@ def mark_data_access(j, outfile):
             if text:
                 outfile.write(f'Make{text}(0x{addr:x}); // 0x{daddr}\n')
 
-        outfile.write(
-            f'MakeComm(0x{addr:x}, "RT: type={type_hint} r={read_count} w={write_count} sizes={data.get("Sizes", [])}");\n'
+        summary = (
+            f"RT data: type={type_hint} r={read_count} w={write_count} "
+            f"sizes={data.get('Sizes', [])} rs={data.get('ReadSizes', [])} "
+            f"ws={data.get('WriteSizes', [])} arr={1 if data.get('Array', False) else 0}"
         )
+        outfile.write(f'MakeComm(0x{addr:x}, "{_idc_escape(summary)}");\n')
 
 
 def process_jumps(j, outfile):
@@ -145,23 +191,89 @@ def process_flow_edges(j, outfile):
             dst_i = int(dst)
             dst_hex = f"0x{addr_dbx2ida(dst_i):x}"
             mask = int(edge_kinds.get(dst, 0))
-            tags = []
-            if mask & (1 << 0):
-                tags.append("JMP")
-            if mask & (1 << 1):
-                tags.append("CALL")
-            if mask & (1 << 2):
-                tags.append("RET")
-            if mask & (1 << 3):
-                tags.append("JCC")
-            if not tags:
-                tags.append("FLOW")
+            tags = _flow_tags(mask)
             kinds_txt.append(f"{'/'.join(tags)}->{dst_hex}#{count}")
+            # Add cross-reference hints directly in IDA database.
+            # 2 == fl_JN according to IDC constants; works as a generic code edge.
+            outfile.write(f'add_cref(0x{src:x}, 0x{addr_dbx2ida(dst_i):x}, 2);\n')
 
         summary = f"RT exec={exec_count}"
         if kinds_txt:
             summary += " edges: " + ", ".join(kinds_txt)
-        outfile.write(f'MakeComm(0x{src:x}, "{summary}");\n')
+        outfile.write(f'MakeComm(0x{src:x}, "{_idc_escape(summary)}");\n')
+
+
+def annotate_code_details(j, outfile):
+    """Annotate code nodes with all available metadata fields."""
+    for daddr, instr in j.get("Code", {}).items():
+        try:
+            src_dbx = int(daddr, 16)
+        except Exception:
+            continue
+        src = addr_dbx2ida(src_dbx)
+        details = []
+
+        if "ExecCount" in instr:
+            details.append(f"exec={instr.get('ExecCount', 0)}")
+        if "Video" in instr:
+            details.append(f"video={1 if instr.get('Video') else 0}")
+        if "Self" in instr:
+            details.append(f"selfmod={1 if instr.get('Self') else 0}")
+        if "Size" in instr:
+            details.append(f"size={instr.get('Size', 0)}")
+        if "Modsize" in instr:
+            details.append(f"mod={instr.get('Modsize', 0)}")
+        if instr.get("SelfVar"):
+            details.append(f"variants={len(instr.get('SelfVar', []))}")
+        if instr.get("Accdat"):
+            details.append(f"accdat={len(instr.get('Accdat', []))}")
+
+        seg_parts = []
+        for seg in ["cs", "ds", "es", "ss", "fs", "gs"]:
+            vals = instr.get(seg, [])
+            if vals:
+                seg_vals = ",".join(f"{seg_dbx2ida(v):x}" for v in sorted(vals))
+                seg_parts.append(f"{seg}=[{seg_vals}]")
+        if seg_parts:
+            details.append("segs " + " ".join(seg_parts))
+
+        if details:
+            summary = "RT code: " + " ".join(details)
+            outfile.write(f'MakeComm(0x{src:x}, "{_idc_escape(summary)}");\n')
+
+
+def process_abi(j, outfile):
+    """Process optional ABI section and attach function ABI hints."""
+    abi = j.get("Abi", {})
+    if not isinstance(abi, dict):
+        return
+
+    for addr_key, info in abi.items():
+        try:
+            dbx_addr = int(addr_key, 16) if isinstance(addr_key, str) else int(addr_key)
+        except Exception:
+            continue
+        ida_addr = addr_dbx2ida(dbx_addr)
+        if not isinstance(info, dict):
+            continue
+
+        parts = []
+        for key in ("InRegs", "OutRegs", "Clobbers", "Preserved", "ArgStack", "RetRegs", "FlagsIn", "FlagsOut"):
+            val = info.get(key)
+            if val:
+                parts.append(f"{key}={val}")
+        if "StackCleanup" in info:
+            parts.append(f"StackCleanup={info.get('StackCleanup')}")
+        if "CallConv" in info:
+            parts.append(f"CallConv={info.get('CallConv')}")
+        if "Confidence" in info:
+            parts.append(f"Confidence={info.get('Confidence')}")
+        if "Calls" in info:
+            parts.append(f"Calls={info.get('Calls')}")
+
+        if parts:
+            text = "RT ABI: " + " ".join(parts)
+            outfile.write(f'MakeComm(0x{ida_addr:x}, "{_idc_escape(text)}");\n')
 
 
 def write_idc_header(outfile):
@@ -196,6 +308,8 @@ def main():
     parser = argparse.ArgumentParser(description="Process a libdosbox run-time info .json file and a .map file to generate IDA Pro IDC script.")
     parser.add_argument('json_file', help='Path to the .json file with run-time data')
     parser.add_argument('map_file', help='Path to the .map file with segment information')
+    parser.add_argument('--ida-load-seg', default='0x1000',
+                        help='IDA image base segment (default: 0x1000)')
     args = parser.parse_args()
 
     global all_segs
@@ -215,6 +329,8 @@ def main():
 
         with open(json_fname) as infile:
             j = jsonpickle.decode(infile.read())
+            configure_load_segments(j.get("Meta", {}), int(args.ida_load_seg, 0))
+            print(f"Load segments: DOSBox={dosbox_load_seg:04x} IDA={ida_load_seg:04x}")
             for daddr, instr in j['Code'].items():
                 mark_code(daddr, instr, outfile, code_segs)
 
@@ -222,7 +338,9 @@ def main():
                 mark_data_access(j, outfile)
 
             process_jumps(j, outfile)
+            annotate_code_details(j, outfile)
             process_flow_edges(j, outfile)
+            process_abi(j, outfile)
 
             print('Used segments: ')
             print(','.join([f'{seg_dbx2ida(seg):x}' for seg in sorted(all_segs)
