@@ -15,10 +15,6 @@ def _idc_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("\"", "\\\"")
 
 
-def _hex_addr(value: int) -> str:
-    return f"0x{value:x}"
-
-
 def addr_dbx2ida(addr: int) -> int:
     return addr + (ida_load_seg - dosbox_load_seg) * 0x10
 
@@ -59,7 +55,10 @@ def read_segments_map(file_name):
                 continue
             name = m["name"]
             if all(not name.startswith(x) for x in {"sub_", "loc_", "locret_", "byte_", "word_", "dword_"}):
-                symbols[m["address"]] = name
+                try:
+                    symbols[int(m["address"], 16)] = name
+                except Exception:
+                    continue
     return symbols
 
 
@@ -146,6 +145,34 @@ def _flow_tags(mask: int) -> list[str]:
     return tags
 
 
+def _fmt_list(values: Any) -> str:
+    if not isinstance(values, list):
+        return str(values)
+    return "[" + ", ".join(str(v) for v in values) + "]"
+
+
+def _safe_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _parse_json_address(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value, 16)
+        except Exception:
+            pass
+        try:
+            return int(value)
+        except Exception:
+            return None
+    return None
+
+
 def mark_data_access(j, outfile):
     """Processes the data segments, setting variable sizes."""
     for daddr, data in j['Data'].items():
@@ -163,23 +190,104 @@ def mark_data_access(j, outfile):
 
         summary = (
             f"RT data: type={type_hint} r={read_count} w={write_count} "
-            f"sizes={data.get('Sizes', [])} rs={data.get('ReadSizes', [])} "
-            f"ws={data.get('WriteSizes', [])} arr={1 if data.get('Array', False) else 0}"
+            f"sizes={_fmt_list(data.get('Sizes', []))} "
+            f"rs={_fmt_list(data.get('ReadSizes', []))} "
+            f"ws={_fmt_list(data.get('WriteSizes', []))} "
+            f"arr={1 if data.get('Array', False) else 0}"
         )
         outfile.write(f'MakeComm(0x{addr:x}, "{_idc_escape(summary)}");\n')
 
 
-def process_jumps(j, outfile):
-    """Processes the jump addresses and adds function definitions."""
-    for daddr in sorted(j['Jumps'], reverse=True):
-        addr = addr_dbx2ida(daddr)
-        outfile.write(f'add_func(0x{addr:x}); // 0x{daddr:x}\n')
+def process_entry_points(j, outfile):
+    """Process discovered function entry points."""
+    starts = set()
+    for raw in j.get("Jumps", []):
+        src = _parse_json_address(raw)
+        if src is not None:
+            starts.add(src)
+    for raw in j.get("FunctionSampling", {}).keys():
+        src = _parse_json_address(raw)
+        if src is not None:
+            starts.add(src)
+    for raw in j.get("Abi", {}).keys():
+        src = _parse_json_address(raw)
+        if src is not None:
+            starts.add(src)
+    for src in sorted(starts, reverse=True):
+        if src is None:
+            continue
+        addr = addr_dbx2ida(src)
+        outfile.write(f'add_func(0x{addr:x}); // 0x{src:x}\n')
+
+
+def process_function_sampling(j, outfile):
+    """Attach per-function sampling metadata."""
+    sampling = j.get("FunctionSampling", {})
+    if not isinstance(sampling, dict):
+        return
+    for daddr, state in sampling.items():
+        src = _parse_json_address(daddr)
+        if src is None:
+            continue
+        if not isinstance(state, dict):
+            continue
+        calls = state.get("Calls")
+        sampled = state.get("SampledCalls")
+        if calls is None and sampled is None:
+            continue
+
+        parts = []
+        if calls is not None:
+            parts.append(f"calls={calls}")
+        if sampled is not None:
+            parts.append(f"sampled={sampled}")
+        if calls not in (None, 0) and sampled is not None:
+            try:
+                parts.append(f"ratio={sampled / calls:.4f}")
+            except Exception:
+                pass
+
+        if parts:
+            summary = "RT sampling: " + ", ".join(parts)
+            outfile.write(f'MakeComm(0x{addr_dbx2ida(src):x}, "{_idc_escape(summary)}");\n')
+
+
+def process_runtime_meta(j, outfile):
+    """Attach top-level runtime metadata as an IDA comment."""
+    meta = j.get("Meta", {})
+    if not isinstance(meta, dict) or not meta:
+        return
+
+    parts = []
+    for key, value in sorted(meta.items(), key=lambda it: str(it[0])):
+        if key == "DosboxLoadSeg":
+            parsed = _safe_int(value)
+            if parsed is not None:
+                value = f"0x{parsed:x}"
+        parts.append(f"{key}={value}")
+    summary = "RT meta: " + ", ".join(parts)
+
+    code_addrs = []
+    for key in j.get("Code", {}).keys():
+        dbx = _parse_json_address(key)
+        if dbx is None:
+            continue
+        code_addrs.append(dbx)
+
+    if code_addrs:
+        anchor = addr_dbx2ida(min(code_addrs))
+        outfile.write(f'MakeComm(0x{anchor:x}, "{_idc_escape(summary)}");\n')
+    else:
+        outfile.write(f'// Runtime metadata: {_idc_escape(summary)}\\n')
 
 
 def process_flow_edges(j, outfile):
     """Annotates outgoing runtime edges and execution counters per instruction."""
     for src_addr, instr in j.get("Code", {}).items():
-        src = addr_dbx2ida(int(src_addr, 16))
+        src_dbx = _parse_json_address(src_addr)
+        if src_dbx is None:
+            continue
+        src = addr_dbx2ida(src_dbx)
         exec_count = instr.get("ExecCount", 0)
         edges = instr.get("Edges", {})
         edge_kinds = instr.get("EdgeKinds", {})
@@ -188,9 +296,15 @@ def process_flow_edges(j, outfile):
 
         kinds_txt = []
         for dst, count in sorted(edges.items(), key=lambda kv: int(kv[1]), reverse=True)[:4]:
-            dst_i = int(dst)
+            dst_i = _parse_json_address(dst)
+            if dst_i is None:
+                continue
             dst_hex = f"0x{addr_dbx2ida(dst_i):x}"
-            mask = int(edge_kinds.get(dst, 0))
+            mask = edge_kinds.get(dst, 0)
+            if not isinstance(mask, int):
+                mask = _safe_int(mask)
+                if mask is None:
+                    mask = 0
             tags = _flow_tags(mask)
             kinds_txt.append(f"{'/'.join(tags)}->{dst_hex}#{count}")
             # Add cross-reference hints directly in IDA database.
@@ -206,9 +320,8 @@ def process_flow_edges(j, outfile):
 def annotate_code_details(j, outfile):
     """Annotate code nodes with all available metadata fields."""
     for daddr, instr in j.get("Code", {}).items():
-        try:
-            src_dbx = int(daddr, 16)
-        except Exception:
+        src_dbx = _parse_json_address(daddr)
+        if src_dbx is None:
             continue
         src = addr_dbx2ida(src_dbx)
         details = []
@@ -227,6 +340,11 @@ def annotate_code_details(j, outfile):
             details.append(f"variants={len(instr.get('SelfVar', []))}")
         if instr.get("Accdat"):
             details.append(f"accdat={len(instr.get('Accdat', []))}")
+        if "Edges" in instr:
+            try:
+                details.append(f"edges={len(instr.get('Edges'))}")
+            except Exception:
+                pass
 
         seg_parts = []
         for seg in ["cs", "ds", "es", "ss", "fs", "gs"]:
@@ -249,9 +367,8 @@ def process_abi(j, outfile):
         return
 
     for addr_key, info in abi.items():
-        try:
-            dbx_addr = int(addr_key, 16) if isinstance(addr_key, str) else int(addr_key)
-        except Exception:
+        dbx_addr = _parse_json_address(addr_key)
+        if dbx_addr is None:
             continue
         ida_addr = addr_dbx2ida(dbx_addr)
         if not isinstance(info, dict):
@@ -300,7 +417,7 @@ print("Generated lst");
 
 def process_symbols(symbols, outfile):
     """Processes and applies symbols from the map file."""
-    for symbol, addr in symbols.items():
+    for addr, symbol in symbols.items():
         outfile.write(f'set_name(0x{addr:x},"_{symbol}",SN_FORCE);\n')
 
 
@@ -337,9 +454,11 @@ def main():
             if 'Data' in j:
                 mark_data_access(j, outfile)
 
-            process_jumps(j, outfile)
+            process_runtime_meta(j, outfile)
+            process_entry_points(j, outfile)
             annotate_code_details(j, outfile)
             process_flow_edges(j, outfile)
+            process_function_sampling(j, outfile)
             process_abi(j, outfile)
 
             print('Used segments: ')
