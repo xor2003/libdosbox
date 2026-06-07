@@ -20,7 +20,11 @@
 #include "dosbox.h"
 
 #include <cctype>
+#include <cstdarg>
+#include <cstdio>
+#include <chrono>
 #include <cstring>
+#include <ctime>
 #include <string>
 
 #include "callback.h"
@@ -42,6 +46,33 @@
 namespace m2c {
 extern std::string exename;
 }
+
+namespace {
+void custom_exec_log(const char *format, ...)
+{
+	using namespace std::chrono;
+	const auto now = system_clock::now();
+	const auto time = system_clock::to_time_t(now);
+	const auto ms = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+
+	std::tm tm_buf = {};
+	localtime_r(&time, &tm_buf);
+
+	char timestamp[32] = {};
+	std::strftime(timestamp, sizeof(timestamp), "%F %T", &tm_buf);
+
+	std::fprintf(stderr, "%s.%03lld | EXEC: ",
+	             timestamp, static_cast<long long>(ms.count()));
+
+	va_list args;
+	va_start(args, format);
+	std::vfprintf(stderr, format, args);
+	va_end(args);
+
+	std::fputc('\n', stderr);
+	std::fflush(stderr);
+}
+} // namespace
 
 #ifdef _MSC_VER
 #pragma pack(1)
@@ -551,6 +582,9 @@ bool DOS_Execute(char * name,PhysPt block_pt,uint8_t flags) {
 			SegSet16(ss, RealSegment(sssp));
 			reg_ip = RealOffset(csip);
 			reg_sp = RealOffset(sssp);
+			custom_exec_log("LOADNGO name=%s loadseg=%04x cs:ip=%04x:%04x ss:sp=%04x:%04x memsize=%04x",
+			                stripname, loadseg, RealSegment(csip), RealOffset(csip),
+			                RealSegment(sssp), RealOffset(sssp), memsize);
 			custom_init_entrypoint(stripname, loadseg);
 
 		if ((reg_sp>0xfffe) || (reg_sp<18)) LOG(LOG_EXEC,LOG_ERROR)("stack underflow/wrap at EXEC");

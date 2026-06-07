@@ -16,9 +16,11 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <array>
+#include <chrono>
 #include <limits>
 #include <sstream>
 #include <cctype>
+#include <ctime>
 
 #ifndef DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 #define DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH 1
@@ -53,6 +55,31 @@ extern bool abi_collection_mode;
 
 namespace {
 bool &abi_collection_mode = m2c::abi_collection_mode;
+
+void custom_log(const char *format, ...)
+{
+	using namespace std::chrono;
+	const auto now = system_clock::now();
+	const auto time = system_clock::to_time_t(now);
+	const auto ms = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+
+	std::tm tm_buf = {};
+	localtime_r(&time, &tm_buf);
+
+	char timestamp[32] = {};
+	std::strftime(timestamp, sizeof(timestamp), "%F %T", &tm_buf);
+
+	std::fprintf(stderr, "%s.%03lld | CUSTOM: ",
+	             timestamp, static_cast<long long>(ms.count()));
+
+	va_list args;
+	va_start(args, format);
+	std::vfprintf(stderr, format, args);
+	va_end(args);
+
+	std::fputc('\n', stderr);
+	std::fflush(stderr);
+}
 
 enum class RuntimeProfile : uint8_t {
 	Analysis = 0,
@@ -133,13 +160,13 @@ const RuntimeProfileStrategy *g_active_profile = &k_analysis_profile;
 
 void print_runtime_modes()
 {
-	printf("custom status: profile=%s compare=%d trace=%d trace_stdout=%d collect_rt=%d collect_vars=%d complex_selfmod=%d abi=%d\n",
-	       g_active_profile->name(), compare_mode ? 1 : 0,
-	       trace_instructions ? 1 : 0,
-	       trace_instructions_to_stdout ? 1 : 0,
-	       collect_rt_info ? 1 : 0, collect_rt_info_vars ? 1 : 0,
-	       complex_self_modifications ? 1 : 0,
-	       abi_collection_mode ? 1 : 0);
+	custom_log("status: profile=%s compare=%d trace=%d trace_stdout=%d collect_rt=%d collect_vars=%d complex_selfmod=%d abi=%d",
+	           g_active_profile->name(), compare_mode ? 1 : 0,
+	           trace_instructions ? 1 : 0,
+	           trace_instructions_to_stdout ? 1 : 0,
+	           collect_rt_info ? 1 : 0, collect_rt_info_vars ? 1 : 0,
+	           complex_self_modifications ? 1 : 0,
+	           abi_collection_mode ? 1 : 0);
 }
 
 const RuntimeProfileStrategy *profile_by_id(RuntimeProfile p)
@@ -157,7 +184,7 @@ void set_runtime_profile(RuntimeProfile p)
 {
 	g_active_profile = profile_by_id(p);
 	g_active_profile->apply();
-	printf("custom profile: %s\n", g_active_profile->name());
+	custom_log("profile: %s", g_active_profile->name());
 	print_runtime_modes();
 }
 
@@ -193,7 +220,7 @@ void toggle_compare_mode(bool pressed)
 	if (!pressed)
 		return;
 	compare_mode = !compare_mode;
-	printf("custom option: compare_mode=%d\n", compare_mode ? 1 : 0);
+	custom_log("option: compare_mode=%d", compare_mode ? 1 : 0);
 	print_runtime_modes();
 }
 
@@ -202,8 +229,7 @@ void toggle_trace_mode(bool pressed)
 	if (!pressed)
 		return;
 	trace_instructions = !trace_instructions;
-	printf("custom option: trace_instructions=%d\n",
-	       trace_instructions ? 1 : 0);
+	custom_log("option: trace_instructions=%d", trace_instructions ? 1 : 0);
 	print_runtime_modes();
 }
 
@@ -212,8 +238,8 @@ void toggle_trace_stdout_mode(bool pressed)
 	if (!pressed)
 		return;
 	trace_instructions_to_stdout = !trace_instructions_to_stdout;
-	printf("custom option: trace_instructions_to_stdout=%d\n",
-	       trace_instructions_to_stdout ? 1 : 0);
+	custom_log("option: trace_instructions_to_stdout=%d",
+	           trace_instructions_to_stdout ? 1 : 0);
 	print_runtime_modes();
 }
 
@@ -222,7 +248,7 @@ void toggle_collect_rt_info_mode(bool pressed)
 	if (!pressed)
 		return;
 	collect_rt_info = !collect_rt_info;
-	printf("custom option: collect_rt_info=%d\n", collect_rt_info ? 1 : 0);
+	custom_log("option: collect_rt_info=%d", collect_rt_info ? 1 : 0);
 	print_runtime_modes();
 }
 
@@ -231,8 +257,8 @@ void toggle_collect_rt_info_vars_mode(bool pressed)
 	if (!pressed)
 		return;
 	collect_rt_info_vars = !collect_rt_info_vars;
-	printf("custom option: collect_rt_info_vars=%d\n",
-	       collect_rt_info_vars ? 1 : 0);
+	custom_log("option: collect_rt_info_vars=%d",
+	           collect_rt_info_vars ? 1 : 0);
 	print_runtime_modes();
 }
 
@@ -241,8 +267,8 @@ void toggle_complex_self_modifications_mode(bool pressed)
 	if (!pressed)
 		return;
 	complex_self_modifications = !complex_self_modifications;
-	printf("custom option: complex_self_modifications=%d\n",
-	       complex_self_modifications ? 1 : 0);
+	custom_log("option: complex_self_modifications=%d",
+	           complex_self_modifications ? 1 : 0);
 	print_runtime_modes();
 }
 
@@ -251,8 +277,8 @@ void toggle_abi_collection_mode(bool pressed)
 	if (!pressed)
 		return;
 	abi_collection_mode = !abi_collection_mode;
-	printf("custom option: abi_collection_mode=%d\n",
-	       abi_collection_mode ? 1 : 0);
+	custom_log("option: abi_collection_mode=%d",
+	           abi_collection_mode ? 1 : 0);
 	print_runtime_modes();
 }
 
@@ -337,7 +363,7 @@ void masm2c_exit(unsigned char exit)
 {
 	(void)exit;
 	init++;
-	printf("masm2c_exit Exiting\n");
+	custom_log("masm2c_exit");
 	// m2c::stackDump();  // Debug stack dump (disabled)
 }
 
@@ -639,7 +665,7 @@ void abi_record_call_boundary(dd callee_linear,
 // Function to dump the stack and shadow memory.
 void stackDumpZ()
 {
-	printf("Executing at exit\n");
+	custom_log("atexit handler");
 	m2c::shadow_memory.dump();
 	stackDump(0);
 }
@@ -674,11 +700,14 @@ void custom_init_prog(char *name, uint16_t relocate, uint16_t init_cs, uint16_t 
 #if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 	// Initialize masm2c and check if it's the target binary.
 	if (masm2c_init(name, relocate, init_cs, init_ip)) {
-		printf("It is target binary. Rise binary enter flags\n");
+		custom_log("target binary matched: name=%s relocate=%04x entry=%04x:%04x",
+		           name ? name : "", relocate, init_cs, init_ip);
 		custom_runs++;
 		init_runs++;
 	}
 #else
+	custom_log("instrument init program: name=%s relocate=%04x entry=%04x:%04x",
+	           name ? name : "", relocate, init_cs, init_ip);
 	(void)name;
 	(void)relocate;
 	(void)init_cs;
@@ -694,14 +723,15 @@ void custom_exit_prog(uint8_t exitcode)
 
 	// Check if it was a target binary.
 	if (!custom_runs) {
-		printf("It wasn't a target binary. Ignoring\n");
+		custom_log("exit program ignored: no target binary active exitcode=%u",
+		           static_cast<unsigned>(exitcode));
 		return;
 	}
 
 	custom_runs--;
 	// Perform deinitialization if needed.
 	if (init_runs) {
-		printf("Doing deinit\n");
+		custom_log("target deinit exitcode=%u", static_cast<unsigned>(exitcode));
 #if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 		masm2c_exit(exitcode);
 		exit(0);
@@ -774,9 +804,10 @@ void custom_init(Section *sec)
 	 */
 	// Add the custom exit function.
 	sec->AddDestroyFunction(&custom_exit);
+	setvbuf(stdout, nullptr, _IONBF, 0);
 
 	// Print library information.
-	fprintf(stderr, "Masm2c/DOSBOX lib, build date %s\n", __DATE__);
+	custom_log("Masm2c/DOSBOX lib, build date %s", __DATE__);
 
 	// Unused variable.
 	X86_REGREF
@@ -824,7 +855,6 @@ void custom_init(Section *sec)
 // Custom initialization function for the entry point.
 void custom_init_entrypoint(char *name, uint16_t loadseg)
 {
-	(void)name;
 	/**
 	 * Entry Point Initialization
 	 *
@@ -834,6 +864,9 @@ void custom_init_entrypoint(char *name, uint16_t loadseg)
 	 * 3. Start instruction tracing
 	 */
 	X86_REGREF
+	custom_log("entrypoint hook: name=%s loadseg=%04x cs:ip=%04x:%04x ss:sp=%04x:%04x dispatch=%d",
+	           name ? name : "", loadseg, cs, ip, ss, sp,
+	           DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH ? 1 : 0);
 	m2c::dumpexe_start_hook(loadseg, cs, ip, ss, sp); // Start execution hook
 	m2c::runtime_loadseg = loadseg;
 
