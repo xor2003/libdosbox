@@ -1,5 +1,6 @@
 libcustom_sources = files([
   'custom.cpp',
+  'custom_compat.cpp',
   'segfault.cpp',
   'shadowstack.cpp',
   'utils.cpp',

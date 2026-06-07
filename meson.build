@@ -97,6 +97,7 @@ extra_flags = [
     '-Wno-unknown-pragmas',
     '-fpch-preprocess',
     '-DDOSBOX_CUSTOM',
+    '-DDOSBOX_CUSTOM_ENABLE_GAME_DISPATCH=0',
     '-DM2CDEBUG=1',
     '-D_SHADOW_STACK',
 ]
