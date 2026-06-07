@@ -39,7 +39,11 @@ bool complex_self_modifications = false;
 // segment values.
 bool collect_rt_info = true;
 // Enable/disable collection of memory access information (slower).
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 bool collect_rt_info_vars = true;
+#else
+bool collect_rt_info_vars = false;
+#endif
 
 namespace m2c {
 extern bool abi_collection_mode;
@@ -808,7 +812,11 @@ void custom_init(Section *sec)
 	                  PRIMARY_MOD, "custabi_t", "Toggle ABI collect");
 	MAPPER_AddHandler(print_runtime_modes_hotkey, SDL_SCANCODE_0,
 	                  PRIMARY_MOD, "custstat", "Custom status");
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 	set_runtime_profile(RuntimeProfile::Analysis);
+#else
+	set_runtime_profile(RuntimeProfile::CollectOnly);
+#endif
 	// MAPPER_AddHandler(DumpExe2, SDL_SCANCODE_F3, PRIMARY_MOD, "dumpexe1",
 	//                   "Dumpexe1");
 }
