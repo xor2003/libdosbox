@@ -60,6 +60,7 @@
 #include "timer.h"
 #include "tracy.h"
 #include "video.h"
+#include "custom.h"
 #include "custom/dumpexe.h"
 
 bool shutdown_requested = false;
@@ -535,8 +536,7 @@ static void DOSBOX_RealInit(Section* sec)
 	DOSBOX_SetLoop(&Normal_Loop);
 
 	MAPPER_AddHandler(DOSBOX_UnlockSpeed, SDL_SCANCODE_F12, MMOD2, "speedlock", "Speedlock");
-	MAPPER_AddHandler(m2c::DumpExe1, SDL_SCANCODE_F2, PRIMARY_MOD,
-	                  "dumpexe1", "Dumpexe1");
+	custom_init(sec);
 
 	DOSBOX_SetMachineTypeFromConfig(section);
 

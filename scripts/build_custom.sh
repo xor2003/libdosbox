@@ -15,9 +15,10 @@ Usage:
   ${SCRIPT_NAME} [PROFILE] [-- CMAKE_OPTIONS...]
 
 Positional arguments:
-  PROFILE     Profile name under src/custom/ (default: f15)
+  PROFILE     Profile name under src/custom/ (default: instrument)
              Matches src/custom/src_<PROFILE>
-             e.g. f15, goody
+             Use 'instrument' for memory dump/runtime info without converted-game dispatch.
+             e.g. instrument, f15, goody
 
   BUILD_DIR   Optional CMake build directory (default: build/custom-<PROFILE>)
 
@@ -38,7 +39,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 	exit 0
 fi
 
-PROFILE="${1:-f15}"
+PROFILE="${1:-instrument}"
 BUILD_DIR="build/custom-${PROFILE}"
 CMAKE_EXTRA=()
 
@@ -112,13 +113,18 @@ if [[ -z "$PROFILE" ]]; then
 	exit 1
 fi
 
-PROFILE_DIR="${REPO_ROOT}/src/custom/src_${PROFILE}"
-if [[ ! -d "$PROFILE_DIR" && -d "${REPO_ROOT}/src/custom/${PROFILE}" ]]; then
-	PROFILE_DIR="${REPO_ROOT}/src/custom/${PROFILE}"
+if [[ "$PROFILE" != "instrument" ]]; then
+	PROFILE_DIR="${REPO_ROOT}/src/custom/src_${PROFILE}"
+	if [[ ! -d "$PROFILE_DIR" && -d "${REPO_ROOT}/src/custom/${PROFILE}" ]]; then
+		PROFILE_DIR="${REPO_ROOT}/src/custom/${PROFILE}"
+	fi
+else
+	PROFILE_DIR=""
 fi
 
-if [[ ! -d "$PROFILE_DIR" ]]; then
+if [[ "$PROFILE" != "instrument" && ! -d "$PROFILE_DIR" ]]; then
 	mapfile -t PROFILES < <(find "${REPO_ROOT}/src/custom" -maxdepth 1 -type d -name 'src_*' -printf '%f\n' | sed 's/^src_//' | sort)
+	PROFILES=("instrument" "${PROFILES[@]}")
 	if (( ${#PROFILES[@]} == 0 )); then
 		echo "No custom profiles found under src/custom/src_*."
 	else

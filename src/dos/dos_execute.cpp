@@ -24,6 +24,7 @@
 #include <string>
 
 #include "callback.h"
+#include "custom.h"
 #include "cpu.h"
 #include "debug.h"
 #include "dos_inc.h"
@@ -550,11 +551,7 @@ bool DOS_Execute(char * name,PhysPt block_pt,uint8_t flags) {
 			SegSet16(ss, RealSegment(sssp));
 			reg_ip = RealOffset(csip);
 			reg_sp = RealOffset(sssp);
-			m2c::dumpexe_start_hook(loadseg,
-			                        RealSegment(csip),
-			                        RealOffset(csip),
-			                        RealSegment(sssp),
-			                        RealOffset(sssp));
+			custom_init_entrypoint(stripname, loadseg);
 
 		if ((reg_sp>0xfffe) || (reg_sp<18)) LOG(LOG_EXEC,LOG_ERROR)("stack underflow/wrap at EXEC");
 		/* Set the stack for new program */

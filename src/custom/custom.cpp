@@ -20,6 +20,10 @@
 #include <sstream>
 #include <cctype>
 
+#ifndef DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
+#define DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH 1
+#endif
+
 // -- configuration start
 
 // Enable/disable instruction tracing to the circular buffer.
@@ -301,11 +305,13 @@ volatile bool doing_single_step = false;
 static int init_runs = 0;
 static int init = 0;
 
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 // Function to initialize the entry point for translated code.
 void init_entrypoint(uint16_t relocate);
 
 // Function to dispatch calls to translated functions.
 extern bool __dispatch_call(m2c::_offsets __disp, struct m2c::_STATE *_state);
+#endif
 
 // Function to print the backtrace (platform-specific).
 #ifndef _WIN32
@@ -314,8 +320,10 @@ extern void print_backtrace(uintptr_t pc);
 
 // masm2c related functions and classes.
 namespace m2c {
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 // Function to initialize masm2c.
 extern void Initializer();
+#endif
 // Class to manage shadow memory for run-time information.
 ShadowMemory shadow_memory;
 
@@ -659,12 +667,19 @@ void custom_init_prog(char *name, uint16_t relocate, uint16_t init_cs, uint16_t 
 		registered = true;
 	}
 
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 	// Initialize masm2c and check if it's the target binary.
 	if (masm2c_init(name, relocate, init_cs, init_ip)) {
 		printf("It is target binary. Rise binary enter flags\n");
 		custom_runs++;
 		init_runs++;
 	}
+#else
+	(void)name;
+	(void)relocate;
+	(void)init_cs;
+	(void)init_ip;
+#endif
 }
 
 // Custom exit function for DOSBox programs.
@@ -683,8 +698,12 @@ void custom_exit_prog(uint8_t exitcode)
 	// Perform deinitialization if needed.
 	if (init_runs) {
 		printf("Doing deinit\n");
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 		masm2c_exit(exitcode);
 		exit(0);
+#else
+		(void)exitcode;
+#endif
 
 		init_runs--;
 	}
@@ -707,6 +726,7 @@ int custom_callf(Bitu CS, Bitu IP)
 
 	// Check if the call is from a valid code segment.
 	if (init_runs) {
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 		if (CS >= 0xa000 || (CS == 0 && cs == 0xf000))
 			return 0;
 
@@ -721,6 +741,11 @@ int custom_callf(Bitu CS, Bitu IP)
 		                              abi_before_segs, cpu_regs, Segs,
 		                              static_cast<dw>(cpu_regs.regs[REGI_SP].word[W_INDEX] - abi_old_sp));
 		return ret;
+#else
+		(void)CS;
+		(void)IP;
+		return 0;
+#endif
 	}
 
 	return 0;
@@ -800,7 +825,8 @@ void custom_init_entrypoint(char *name, uint16_t loadseg)
 	 * 2. Initialize shadow stack
 	 * 3. Start instruction tracing
 	 */
-	m2c::dumpexe_start_hook(loadseg); // Start execution hook
+	X86_REGREF
+	m2c::dumpexe_start_hook(loadseg, cs, ip, ss, sp); // Start execution hook
 	m2c::runtime_loadseg = loadseg;
 
 	// Check if it's a target binary and if initialization is complete.
@@ -812,7 +838,11 @@ void custom_init_entrypoint(char *name, uint16_t loadseg)
 
 	// Initialize the entry point for translated code.
 	if (init_runs) {
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 		init_entrypoint(loadseg);
+#else
+		(void)loadseg;
+#endif
 	}
 }
 
@@ -2255,6 +2285,7 @@ void ShadowMemory::dump()
 void init_entrypoint(uint16_t relocate)
 {
 	(void)relocate;
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 	// Reference the CPU registers.
 	X86_REGREF
 
@@ -2283,4 +2314,5 @@ void init_entrypoint(uint16_t relocate)
 	// Create a new masm2c state and call the entry point.
 	m2c::_STATE _state;
 	(*m2c::_ENTRY_POINT_)(0, &_state);
+#endif
 }

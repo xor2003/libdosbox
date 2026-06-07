@@ -86,6 +86,14 @@ void print_instruction_direct(uint16_t newcs, uint32_t newip)
 namespace m2c {
 bool abi_collection_mode = false;
 
+#if !DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
+struct Memory {
+	db data[16 * 1024 * 1024] = {};
+};
+
+Memory m;
+#endif
+
 #if defined(__GNUC__)
 __attribute__((weak))
 #endif
@@ -93,3 +101,10 @@ void load_drivers()
 {
 }
 } // namespace m2c
+
+#if !DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
+bool __dispatch_call(m2c::_offsets, m2c::_STATE *)
+{
+	return false;
+}
+#endif
