@@ -2,7 +2,14 @@
 #define DOSBOX_CUSTOM_H
 
 #include "dosbox.h"
+#include <cstddef>
+#include <cstdint>
+#include <array>
 #include <stack>
+#include <string>
+#include <memory>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 typedef uint16_t dw;
@@ -14,9 +21,7 @@ extern bool compare_mode;
 extern uint32_t last_ip;
 extern int custom_runs;
 
-#include <unordered_set>
-#include <unordered_map>
-#include <memory>
+// Keep JSON include portable across nlohmann installations.
 #if __has_include(<json.hpp>)
 #include <json.hpp>
 #elif __has_include(<nlohmann/json.hpp>)
@@ -34,11 +39,20 @@ enum class FlowKind : uint8_t {
 	Other = 4,
 };
 
+enum RuntimeValueClass : uint32_t {
+	RtValueUnknown    = 0,
+	RtValueDataOffset = 1u << 0,
+	RtValueCodeOffset = 1u << 1,
+	RtValueString     = 1u << 2,
+	RtValueSegment    = 1u << 3,
+	RtValueFarPointer = 1u << 4,
+};
+
 extern std::string exename;
 
 extern void Jend();
 
-    extern int log_debug(const char *format, ...);
+extern int log_debug(const char *format, ...);
 
 struct _STATE;
     class ShadowStack {
@@ -112,19 +126,63 @@ struct _STATE;
 
  };
 
- struct Data: public Byte
- {
-   std::unordered_set<size_t> sizes;
-   std::unordered_set<size_t> read_sizes;
-   std::unordered_set<size_t> write_sizes;
-   size_t read_count = 0;
-   size_t write_count = 0;
-   bool m_array = false;
+	 struct Data: public Byte
+	 {
+	   std::unordered_set<size_t> sizes;
+	   std::unordered_set<size_t> read_sizes;
+	   std::unordered_set<size_t> write_sizes;
+	   std::unordered_map<dd, size_t> value_target_count;
+	   std::unordered_map<dd, uint32_t> value_target_class_mask;
+	   uint32_t value_class_mask = 0;
+	   size_t read_count = 0;
+	   size_t write_count = 0;
+	   bool m_array = false;
 //   std::unordered_set<dd> referedcsip;
 
    friend void to_json(nlohmann::json& nlohmann_json_j, const Data& nlohmann_json_t);
-   virtual ~Data(){}
- };
+	   virtual ~Data(){}
+	 };
+
+	 struct PtrEvidence: public Byte
+	 {
+	   dd source_addr = 0;
+	   dd target_addr = 0;
+	   dd producer_csip = 0;
+	   dd use_csip = 0;
+	   size_t count = 0;
+	   uint32_t flags = 0;
+	   size_t size = 0;
+	   uint64_t value = 0;
+
+	   friend void to_json(nlohmann::json& nlohmann_json_j, const PtrEvidence& nlohmann_json_t);
+	 };
+
+	 struct AccessSample
+	 {
+	   dd addr = 0;
+	   uint64_t value = 0;
+	   uint32_t value_class_mask = 0;
+
+	   friend void to_json(nlohmann::json& nlohmann_json_j, const AccessSample& nlohmann_json_t);
+	 };
+
+	 struct AccessSite: public Byte
+	 {
+	   dd csip = 0;
+	   dd min_addr = 0xffffffffu;
+	   dd max_addr = 0;
+	   dd last_addr = 0;
+	   uint32_t gcd_delta = 0;
+	   size_t count = 0;
+	   size_t distinct_count = 0;
+	   uint32_t size_mask = 0;
+	   uint32_t rw_mask = 0;
+	   uint32_t value_class_mask = 0;
+	   std::vector<AccessSample> samples;
+	   std::unordered_set<dd> seen_addrs;
+
+	   friend void to_json(nlohmann::json& nlohmann_json_j, const AccessSite& nlohmann_json_t);
+	 };
 
  struct Code: public Byte
  {
@@ -145,23 +203,32 @@ struct _STATE;
  };
 
  class ShadowMemory
- {
-   std::unordered_map< dd, std::shared_ptr<Data> > m_data;
-   std::unordered_map< dd, std::shared_ptr<Code> > m_code;
-   std::unordered_set<dd> m_jumps;
+	 {
+	   std::unordered_map< dd, std::shared_ptr<Data> > m_data;
+	   std::unordered_map< dd, std::shared_ptr<Code> > m_code;
+	   std::unordered_map< uint64_t, PtrEvidence > m_pointer_evidence;
+	   std::unordered_map< uint64_t, AccessSite > m_access_sites;
+	   std::unordered_set<dd> m_jumps;
+	   void record_pointer_use(dd source_addr, dd target_addr, dd producer_csip,
+	                           dd use_csip, uint64_t value, size_t size, uint32_t flags);
+	   void update_access_site(dd csip, dd addr, size_t size, bool is_write,
+	                           uint64_t value, bool has_value, uint32_t value_class_mask);
 
-   public:
-   void collect_segs();
-   void collect_data(dd b, size_t s, bool is_write = false);
-   void collect_selfmod(dw seg, dd ip, size_t modsize, size_t size, const char * oldins, const char * newins);
-   void collect_cross_jumps(dw target_cs, dd target_ip, FlowKind kind = FlowKind::Other);
-   void dump();
+	   public:
+	   void collect_segs();
+	   void collect_data(dd b, size_t s, bool is_write = false, uint64_t value = 0, bool has_value = false);
+	   void collect_selfmod(dw seg, dd ip, size_t modsize, size_t size, const char * oldins, const char * newins);
+	   void collect_cross_jumps(dw target_cs, dd target_ip, FlowKind kind = FlowKind::Other);
+	   void dump();
    friend void to_json(nlohmann::json& nlohmann_json_j, const ShadowMemory& nlohmann_json_t);
    
 
  };
 
-  extern ShadowMemory shadow_memory;
+	  extern ShadowMemory shadow_memory;
+void rt_collect_memory_read(dd address, uint8_t size, uint64_t value);
+void rt_collect_memory_write(dd address, uint8_t size, uint64_t value);
+extern bool abi_collection_mode;
 // -------------------------
 
 }

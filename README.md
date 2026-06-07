@@ -393,6 +393,7 @@ Use it to reapply hooks after syncing with upstream `dosbox-staging`, or when po
 
 ### Profiles
 
+- `Ctrl+F2`: dump executable and memory image (`#NONAME#.1`) via `DumpExe1`
 - `Ctrl+F3`: cycle profile (`analysis -> tracing -> compare -> collect_only`)
 - `Ctrl+F4`: set `analysis`
 - `Ctrl+F5`: set `tracing`
@@ -406,6 +407,9 @@ Use it to reapply hooks after syncing with upstream `dosbox-staging`, or when po
 - `Ctrl+4`: toggle `collect_rt_info`
 - `Ctrl+5`: toggle `collect_rt_info_vars`
 - `Ctrl+6`: toggle `complex_self_modifications`
+- `Ctrl+7`: toggle `abi_collection_mode`
+- `Ctrl+0`: show current custom status
+
 
 ### Order / precedence
 
@@ -414,3 +418,28 @@ Use it to reapply hooks after syncing with upstream `dosbox-staging`, or when po
 - Setting a profile rewrites the whole option set.
 - After choosing a profile, you can still fine-tune with per-option toggles.
 - Choosing another profile later overrides those manual toggles again.
+
+## Memory dump workflow (legacy `0.5x` style)
+
+`Ctrl+F2` is mapped to `m2c::DumpExe1` in this branch. On KDE/Linux, `Alt+F2` is commonly reserved, so `Ctrl+F2` is the safer default.
+
+The output file is always named `#NONAME#.1` in the current DOSBox working directory.
+
+Workflow:
+
+1. Run program, then press `Ctrl+F2` in DOSBox to produce `#NONAME#.1`.
+2. Snapshot it:
+   - `./scripts/memdump-workflow.sh snap --dir /home/xor/games/f15 pre_eatmem`
+3. In DOSBox, run `eatmem.com`.
+4. Restart and re-run the target program.
+5. Press `Ctrl+F2` again and snapshot a second file:
+   - `./scripts/memdump-workflow.sh snap --dir /home/xor/games/f15 post_eatmem`
+6. Compare:
+   - `./scripts/memdump-workflow.sh compare /home/xor/games/f15/.memdump/pre_eatmem.1 /home/xor/games/f15/.memdump/post_eatmem.1`
+
+Optional helpers:
+
+- Fix relocations in-place on a snapshot:
+  - `./scripts/memdump-workflow.sh snap --fix-relocs --dir /home/xor/games/f15 pre_eatmem`
+- If you only want byte diff between two snapshot files, use `fc.py` directly:
+  - `./scripts/memdump-workflow.sh compare <file_a> <file_b> 0x0 0x0`

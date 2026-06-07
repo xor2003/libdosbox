@@ -153,6 +153,13 @@ def _fmt_list(values: Any) -> str:
 
 def _safe_int(value: Any) -> int | None:
     try:
+        if isinstance(value, str):
+            try:
+                return int(value, 0)
+            except Exception:
+                if re.search(r"[a-fA-F]", value):
+                    return int(value, 16)
+                return int(value)
         return int(value)
     except Exception:
         return None
@@ -163,14 +170,46 @@ def _parse_json_address(value: Any) -> int | None:
         return value
     if isinstance(value, str):
         try:
-            return int(value, 16)
+            return int(value, 0)
         except Exception:
             pass
         try:
+            if re.search(r"[a-fA-F]", value):
+                return int(value, 16)
             return int(value)
         except Exception:
             return None
     return None
+
+
+RT_DATA_OFFSET = 1 << 0
+RT_CODE_OFFSET = 1 << 1
+RT_STRING = 1 << 2
+RT_SEGMENT = 1 << 3
+RT_FAR_POINTER = 1 << 4
+
+
+def _mask_has(mask: Any, flag: int) -> bool:
+    parsed = _safe_int(mask)
+    return parsed is not None and (parsed & flag) != 0
+
+
+def _json_addr_field(obj: dict[str, Any], key: str) -> int | None:
+    return _parse_json_address(obj.get(key))
+
+
+def _iter_addr_count_map(mapping: Any):
+    if not isinstance(mapping, dict):
+        return
+    for raw_addr, raw_count in mapping.items():
+        addr = _parse_json_address(raw_addr)
+        count = _safe_int(raw_count)
+        if addr is not None:
+            yield addr, 0 if count is None else count
+
+
+def _data_make_for_size(size: int) -> str | None:
+    return {1: "MakeByte", 2: "MakeWord", 4: "MakeDword"}.get(size)
 
 
 def mark_data_access(j, outfile):
@@ -188,6 +227,17 @@ def mark_data_access(j, outfile):
             if text:
                 outfile.write(f'Make{text}(0x{addr:x}); // 0x{daddr}\n')
 
+        value_targets = data.get("ValueTargets", {})
+        value_target_classes = data.get("ValueTargetClasses", {})
+        for target_dbx, _count in _iter_addr_count_map(value_targets):
+            target = addr_dbx2ida(target_dbx)
+            raw_cls = value_target_classes.get(hex(target_dbx), value_target_classes.get(str(target_dbx), 0))
+            cls = _safe_int(raw_cls) or 0
+            if _mask_has(cls, RT_STRING):
+                outfile.write(f'create_strlit(0x{target:x}, BADADDR);\n')
+            if _mask_has(cls, RT_DATA_OFFSET | RT_STRING | RT_FAR_POINTER | RT_CODE_OFFSET):
+                outfile.write(f'add_dref(0x{addr:x}, 0x{target:x}, dr_O);\n')
+
         summary = (
             f"RT data: type={type_hint} r={read_count} w={write_count} "
             f"sizes={_fmt_list(data.get('Sizes', []))} "
@@ -196,6 +246,71 @@ def mark_data_access(j, outfile):
             f"arr={1 if data.get('Array', False) else 0}"
         )
         outfile.write(f'MakeComm(0x{addr:x}, "{_idc_escape(summary)}");\n')
+
+
+def process_pointer_evidence(j, outfile):
+    """Turn runtime pointer-use evidence into IDA offset/data/code xrefs."""
+    evidence = j.get("PointerEvidence", {})
+    if not isinstance(evidence, dict):
+        return
+    for _key, item in evidence.items():
+        if not isinstance(item, dict):
+            continue
+        source_dbx = _json_addr_field(item, "SourceAddr")
+        target_dbx = _json_addr_field(item, "TargetAddr")
+        if source_dbx is None or target_dbx is None:
+            continue
+        source = addr_dbx2ida(source_dbx)
+        target = addr_dbx2ida(target_dbx)
+        size = _safe_int(item.get("Size")) or 2
+        flags = _safe_int(item.get("Flags")) or 0
+
+        make = _data_make_for_size(4 if _mask_has(flags, RT_FAR_POINTER) else min(size, 4))
+        if make:
+            outfile.write(f'{make}(0x{source:x}); // runtime pointer evidence 0x{source_dbx:x}\n')
+        outfile.write(f'OpOff(0x{source:x}, 0, 0);\n')
+        outfile.write(f'add_dref(0x{source:x}, 0x{target:x}, dr_O);\n')
+
+        use_dbx = _json_addr_field(item, "UseCsip")
+        if use_dbx is not None and _mask_has(flags, RT_CODE_OFFSET):
+            outfile.write(f'add_cref(0x{addr_dbx2ida(use_dbx):x}, 0x{target:x}, fl_CN);\n')
+            outfile.write(f'add_func(0x{target:x});\n')
+        if _mask_has(flags, RT_STRING):
+            outfile.write(f'create_strlit(0x{target:x}, BADADDR);\n')
+
+
+def process_access_sites(j, outfile):
+    """Use compact access-site summaries to mark regular arrays/tables."""
+    access_sites = j.get("AccessSites", {})
+    if not isinstance(access_sites, dict):
+        return
+    for _key, site in access_sites.items():
+        if not isinstance(site, dict):
+            continue
+        min_dbx = _json_addr_field(site, "MinAddr")
+        max_dbx = _json_addr_field(site, "MaxAddr")
+        if min_dbx is None or max_dbx is None or max_dbx <= min_dbx:
+            continue
+        distinct = _safe_int(site.get("DistinctCount")) or 0
+        if distinct < 2:
+            continue
+        size_mask = _safe_int(site.get("SizeMask")) or 0
+        sizes = [s for s in (1, 2, 4, 8) if size_mask & (1 << s)]
+        if len(sizes) != 1:
+            continue
+        elem_size = sizes[0]
+        gcd_delta = _safe_int(site.get("GcdDelta")) or 0
+        if gcd_delta not in (0, elem_size):
+            continue
+        count = ((max_dbx - min_dbx) // elem_size) + 1
+        if count <= 1 or count > 0x10000:
+            continue
+        make = _data_make_for_size(elem_size)
+        if not make:
+            continue
+        start = addr_dbx2ida(min_dbx)
+        outfile.write(f'{make}(0x{start:x}); // runtime access-site array\n')
+        outfile.write(f'MakeArray(0x{start:x}, {count});\n')
 
 
 def process_entry_points(j, outfile):
@@ -453,6 +568,8 @@ def main():
 
             if 'Data' in j:
                 mark_data_access(j, outfile)
+            process_pointer_evidence(j, outfile)
+            process_access_sites(j, outfile)
 
             process_runtime_meta(j, outfile)
             process_entry_points(j, outfile)

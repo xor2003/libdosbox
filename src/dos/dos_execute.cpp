@@ -21,6 +21,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <string>
 
 #include "callback.h"
 #include "cpu.h"
@@ -30,11 +31,16 @@
 #include "paging.h"
 #include "program_setver.h"
 #include "programs.h"
+#include "../custom/dumpexe.h"
 #include "regs.h"
 #include "string_utils.h"
 #include "video.h"
 
 #include "../hardware/vmware.h"
+
+namespace m2c {
+extern std::string exename;
+}
 
 #ifdef _MSC_VER
 #pragma pack(1)
@@ -291,6 +297,7 @@ bool DOS_Execute(char * name,PhysPt block_pt,uint8_t flags) {
 	uint16_t pspseg,envseg,loadseg,memsize,readsize;
 	PhysPt loadaddress;RealPt relocpt;
 	Bitu headersize=0,imagesize=0;
+	char stripname[8] = {0};
 	DOS_ParamBlock block(block_pt);
 
 	block.LoadData();
@@ -502,7 +509,8 @@ bool DOS_Execute(char * name,PhysPt block_pt,uint8_t flags) {
 		if ( (d2>=DOS_DRIVES) || !Drives[d2] ) reg_bh = 0xFF; else reg_bh = 0;
 
 		/* Write filename in new program MCB */
-		char stripname[8]= { 0 };Bitu index=0;
+		Bitu index=0;
+		memset(stripname, 0, sizeof(stripname));
 		while (char chr=*name++) {
 			switch (chr) {
 			case ':':case '\\':case '/':index=0;break;
@@ -536,7 +544,18 @@ bool DOS_Execute(char * name,PhysPt block_pt,uint8_t flags) {
 		return true;
 	}
 
-	if (flags==LOADNGO) {
+		if (flags==LOADNGO) {
+			m2c::exename = stripname;
+			SegSet16(cs, RealSegment(csip));
+			SegSet16(ss, RealSegment(sssp));
+			reg_ip = RealOffset(csip);
+			reg_sp = RealOffset(sssp);
+			m2c::dumpexe_start_hook(loadseg,
+			                        RealSegment(csip),
+			                        RealOffset(csip),
+			                        RealSegment(sssp),
+			                        RealOffset(sssp));
+
 		if ((reg_sp>0xfffe) || (reg_sp<18)) LOG(LOG_EXEC,LOG_ERROR)("stack underflow/wrap at EXEC");
 		/* Set the stack for new program */
 		SegSet16(ss,RealSegment(sssp));reg_sp=RealOffset(sssp);

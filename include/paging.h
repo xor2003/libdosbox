@@ -25,6 +25,30 @@
 
 #include "mem.h"
 
+#if defined(DOSBOX_CUSTOM)
+extern bool collect_rt_info;
+extern bool collect_rt_info_vars;
+namespace m2c {
+void rt_collect_memory_read(uint32_t address, uint8_t size, uint64_t value);
+void rt_collect_memory_write(uint32_t address, uint8_t size, uint64_t value);
+} // namespace m2c
+
+static inline void custom_rt_memory_read(uint32_t address, uint8_t size, uint64_t value)
+{
+	if (collect_rt_info && collect_rt_info_vars)
+		m2c::rt_collect_memory_read(address, size, value);
+}
+
+static inline void custom_rt_memory_write(uint32_t address, uint8_t size, uint64_t value)
+{
+	if (collect_rt_info && collect_rt_info_vars)
+		m2c::rt_collect_memory_write(address, size, value);
+}
+#else
+static inline void custom_rt_memory_read(uint32_t, uint8_t, uint64_t) {}
+static inline void custom_rt_memory_write(uint32_t, uint8_t, uint64_t) {}
+#endif
+
 // disable this to reduce the size of the TLB
 // NOTE: does not work with the dynamic core (dynrec is fine)
 #define USE_FULL_TLB
@@ -350,11 +374,14 @@ static inline uint8_t mem_readb_inline(const PhysPt address)
 		DEBUG_UpdateMemoryReadBreakpoints<uint8_t>(address);
 	}
 	HostPt tlb_addr = get_tlb_read(address);
+	uint8_t value = 0;
 	if (tlb_addr) {
-		return host_readb(tlb_addr + address);
+		value = host_readb(tlb_addr + address);
 	} else {
-		return (get_tlb_readhandler(address))->readb(address);
+		value = (get_tlb_readhandler(address))->readb(address);
 	}
+	custom_rt_memory_read(address, 1, value);
+	return value;
 }
 
 template <MemOpMode op_mode = MemOpMode::WithBreakpoints>
@@ -365,13 +392,18 @@ static inline uint16_t mem_readw_inline(const PhysPt address)
 	}
 	if ((address & 0xfff) < 0xfff) {
 		HostPt tlb_addr = get_tlb_read(address);
+		uint16_t value = 0;
 		if (tlb_addr) {
-			return host_readw(tlb_addr + address);
+			value = host_readw(tlb_addr + address);
 		} else {
-			return (get_tlb_readhandler(address))->readw(address);
+			value = (get_tlb_readhandler(address))->readw(address);
 		}
+		custom_rt_memory_read(address, 2, value);
+		return value;
 	} else {
-		return mem_unalignedreadw(address);
+		const uint16_t value = mem_unalignedreadw(address);
+		custom_rt_memory_read(address, 2, value);
+		return value;
 	}
 }
 
@@ -383,12 +415,17 @@ static inline uint32_t mem_readd_inline(const PhysPt address)
 	}
 	if ((address & 0xfff) < 0xffd) {
 		HostPt tlb_addr = get_tlb_read(address);
+		uint32_t value = 0;
 		if (tlb_addr)
-			return host_readd(tlb_addr + address);
+			value = host_readd(tlb_addr + address);
 		else
-			return get_tlb_readhandler(address)->readd(address);
+			value = get_tlb_readhandler(address)->readd(address);
+		custom_rt_memory_read(address, 4, value);
+		return value;
 	} else {
-		return mem_unalignedreadd(address);
+		const uint32_t value = mem_unalignedreadd(address);
+		custom_rt_memory_read(address, 4, value);
+		return value;
 	}
 }
 
@@ -400,24 +437,31 @@ static inline uint64_t mem_readq_inline(PhysPt address)
 	}
 	if ((address & 0xfff) < 0xff9) {
 		HostPt tlb_addr = get_tlb_read(address);
+		uint64_t value = 0;
 		if (tlb_addr) {
-			return host_readq(tlb_addr + address);
+			value = host_readq(tlb_addr + address);
 		} else {
-			return get_tlb_readhandler(address)->readq(address);
+			value = get_tlb_readhandler(address)->readq(address);
 		}
+		custom_rt_memory_read(address, 8, value);
+		return value;
 	} else {
-		return mem_unalignedreadq(address);
+		const uint64_t value = mem_unalignedreadq(address);
+		custom_rt_memory_read(address, 8, value);
+		return value;
 	}
 }
 
 static inline void mem_writeb_inline(PhysPt address, uint8_t val)
 {
+	custom_rt_memory_write(address, 1, val);
 	HostPt tlb_addr = get_tlb_write(address);
 	if (tlb_addr) host_writeb(tlb_addr+address,val);
 	else (get_tlb_writehandler(address))->writeb(address,val);
 }
 
 static inline void mem_writew_inline(PhysPt address,uint16_t val) {
+	custom_rt_memory_write(address, 2, val);
 	if ((address & 0xfff)<0xfff) {
 		HostPt tlb_addr=get_tlb_write(address);
 		if (tlb_addr) host_writew(tlb_addr+address,val);
@@ -426,6 +470,7 @@ static inline void mem_writew_inline(PhysPt address,uint16_t val) {
 }
 
 static inline void mem_writed_inline(PhysPt address,uint32_t val) {
+	custom_rt_memory_write(address, 4, val);
 	if ((address & 0xfff)<0xffd) {
 		HostPt tlb_addr=get_tlb_write(address);
 		if (tlb_addr) host_writed(tlb_addr+address,val);
@@ -435,6 +480,7 @@ static inline void mem_writed_inline(PhysPt address,uint32_t val) {
 
 static inline void mem_writeq_inline(PhysPt address, uint64_t val)
 {
+	custom_rt_memory_write(address, 8, val);
 	if ((address & 0xfff) < 0xff9) {
 		HostPt tlb_addr = get_tlb_write(address);
 		if (tlb_addr) {
@@ -451,8 +497,14 @@ static inline bool mem_readb_checked(PhysPt address, uint8_t * val) {
 	HostPt tlb_addr=get_tlb_read(address);
 	if (tlb_addr) {
 		*val=host_readb(tlb_addr+address);
+		custom_rt_memory_read(address, 1, *val);
 		return false;
-	} else return (get_tlb_readhandler(address))->readb_checked(address, val);
+	} else {
+		const bool result = (get_tlb_readhandler(address))->readb_checked(address, val);
+		if (!result)
+			custom_rt_memory_read(address, 1, *val);
+		return result;
+	}
 }
 
 static inline bool mem_readw_checked(PhysPt address, uint16_t * val) {
@@ -460,9 +512,20 @@ static inline bool mem_readw_checked(PhysPt address, uint16_t * val) {
 		HostPt tlb_addr=get_tlb_read(address);
 		if (tlb_addr) {
 			*val=host_readw(tlb_addr+address);
+			custom_rt_memory_read(address, 2, *val);
 			return false;
-		} else return (get_tlb_readhandler(address))->readw_checked(address, val);
-	} else return mem_unalignedreadw_checked(address, val);
+		} else {
+			const bool result = (get_tlb_readhandler(address))->readw_checked(address, val);
+			if (!result)
+				custom_rt_memory_read(address, 2, *val);
+			return result;
+		}
+	} else {
+		const bool result = mem_unalignedreadw_checked(address, val);
+		if (!result)
+			custom_rt_memory_read(address, 2, *val);
+		return result;
+	}
 }
 
 static inline bool mem_readd_checked(PhysPt address, uint32_t * val) {
@@ -470,9 +533,20 @@ static inline bool mem_readd_checked(PhysPt address, uint32_t * val) {
 		HostPt tlb_addr=get_tlb_read(address);
 		if (tlb_addr) {
 			*val=host_readd(tlb_addr+address);
+			custom_rt_memory_read(address, 4, *val);
 			return false;
-		} else return (get_tlb_readhandler(address))->readd_checked(address, val);
-	} else return mem_unalignedreadd_checked(address, val);
+		} else {
+			const bool result = (get_tlb_readhandler(address))->readd_checked(address, val);
+			if (!result)
+				custom_rt_memory_read(address, 4, *val);
+			return result;
+		}
+	} else {
+		const bool result = mem_unalignedreadd_checked(address, val);
+		if (!result)
+			custom_rt_memory_read(address, 4, *val);
+		return result;
+	}
 }
 
 static inline bool mem_readq_checked(PhysPt address, uint64_t* val)
@@ -481,12 +555,19 @@ static inline bool mem_readq_checked(PhysPt address, uint64_t* val)
 		HostPt tlb_addr = get_tlb_read(address);
 		if (tlb_addr) {
 			*val = host_readq(tlb_addr + address);
+			custom_rt_memory_read(address, 8, *val);
 			return false;
 		} else {
-			return (get_tlb_readhandler(address))->readq_checked(address, val);
+			const bool result = (get_tlb_readhandler(address))->readq_checked(address, val);
+			if (!result)
+				custom_rt_memory_read(address, 8, *val);
+			return result;
 		}
 	} else {
-		return mem_unalignedreadq_checked(address, val);
+		const bool result = mem_unalignedreadq_checked(address, val);
+		if (!result)
+			custom_rt_memory_read(address, 8, *val);
+		return result;
 	}
 }
 
@@ -495,8 +576,14 @@ static inline bool mem_writeb_checked(PhysPt address, uint8_t val)
 	HostPt tlb_addr = get_tlb_write(address);
 	if (tlb_addr) {
 		host_writeb(tlb_addr+address,val);
+		custom_rt_memory_write(address, 1, val);
 		return false;
-	} else return (get_tlb_writehandler(address))->writeb_checked(address,val);
+	} else {
+		const bool result = (get_tlb_writehandler(address))->writeb_checked(address,val);
+		if (!result)
+			custom_rt_memory_write(address, 1, val);
+		return result;
+	}
 }
 
 static inline bool mem_writew_checked(PhysPt address,uint16_t val) {
@@ -504,9 +591,20 @@ static inline bool mem_writew_checked(PhysPt address,uint16_t val) {
 		HostPt tlb_addr=get_tlb_write(address);
 		if (tlb_addr) {
 			host_writew(tlb_addr+address,val);
+			custom_rt_memory_write(address, 2, val);
 			return false;
-		} else return (get_tlb_writehandler(address))->writew_checked(address,val);
-	} else return mem_unalignedwritew_checked(address,val);
+		} else {
+			const bool result = (get_tlb_writehandler(address))->writew_checked(address,val);
+			if (!result)
+				custom_rt_memory_write(address, 2, val);
+			return result;
+		}
+	} else {
+		const bool result = mem_unalignedwritew_checked(address,val);
+		if (!result)
+			custom_rt_memory_write(address, 2, val);
+		return result;
+	}
 }
 
 static inline bool mem_writed_checked(PhysPt address,uint32_t val) {
@@ -514,9 +612,20 @@ static inline bool mem_writed_checked(PhysPt address,uint32_t val) {
 		HostPt tlb_addr=get_tlb_write(address);
 		if (tlb_addr) {
 			host_writed(tlb_addr+address,val);
+			custom_rt_memory_write(address, 4, val);
 			return false;
-		} else return (get_tlb_writehandler(address))->writed_checked(address,val);
-	} else return mem_unalignedwrited_checked(address,val);
+		} else {
+			const bool result = (get_tlb_writehandler(address))->writed_checked(address,val);
+			if (!result)
+				custom_rt_memory_write(address, 4, val);
+			return result;
+		}
+	} else {
+		const bool result = mem_unalignedwrited_checked(address,val);
+		if (!result)
+			custom_rt_memory_write(address, 4, val);
+		return result;
+	}
 }
 
 static inline bool mem_writeq_checked(PhysPt address, uint64_t val)
@@ -525,12 +634,19 @@ static inline bool mem_writeq_checked(PhysPt address, uint64_t val)
 		HostPt tlb_addr = get_tlb_write(address);
 		if (tlb_addr) {
 			host_writeq(tlb_addr + address, val);
+			custom_rt_memory_write(address, 8, val);
 			return false;
 		} else {
-			return (get_tlb_writehandler(address))->writeq_checked(address, val);
+			const bool result = (get_tlb_writehandler(address))->writeq_checked(address, val);
+			if (!result)
+				custom_rt_memory_write(address, 8, val);
+			return result;
 		}
 	} else {
-		return mem_unalignedwriteq_checked(address, val);
+		const bool result = mem_unalignedwriteq_checked(address, val);
+		if (!result)
+			custom_rt_memory_write(address, 8, val);
+		return result;
 	}
 }
 

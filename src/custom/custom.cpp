@@ -15,6 +15,8 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <array>
+#include <limits>
 #include <sstream>
 #include <cctype>
 
@@ -34,12 +36,16 @@ bool complex_self_modifications = false;
 bool collect_rt_info = true;
 // Enable/disable collection of memory access information (slower).
 bool collect_rt_info_vars = true;
-// Enable/disable ABI metadata collection.
-bool abi_collection_mode = false;
+
+namespace m2c {
+extern bool abi_collection_mode;
+}
 
 // -- configuration end
 
 namespace {
+bool &abi_collection_mode = m2c::abi_collection_mode;
+
 enum class RuntimeProfile : uint8_t {
 	Analysis = 0,
 	Tracing = 1,
@@ -371,6 +377,181 @@ std::string exename;
 dw runtime_loadseg = 0;
 // Function to print collected traces.
 static void print_traces();
+static uint32_t compute_runtime_image_size_bytes();
+
+namespace {
+constexpr dd k_default_image_start = 0x1920;
+constexpr dd k_default_image_end   = 0xa0000;
+constexpr size_t k_ptr_candidate_cache_size = 4096;
+constexpr size_t k_access_sample_limit = 8;
+
+struct PtrCandidate {
+	bool valid = false;
+	dd source_addr = 0;
+	dd producer_csip = 0;
+	dw value = 0;
+	dw seg_context = 0;
+	uint32_t flags = 0;
+	size_t size = 0;
+};
+
+std::array<PtrCandidate, k_ptr_candidate_cache_size> ptr_candidate_cache;
+
+static inline dd current_csip()
+{
+	X86_REGREF
+	if (cs >= 0x192 && cs < 0xa000)
+		return (cs << 4) + eip;
+	return 0;
+}
+
+static inline uint32_t gcd32(uint32_t a, uint32_t b)
+{
+	while (b != 0) {
+		const uint32_t t = a % b;
+		a = b;
+		b = t;
+	}
+	return a;
+}
+
+static inline uint32_t size_to_mask(size_t size)
+{
+	if (size == 0 || size > 31)
+		return 0;
+	return 1u << static_cast<uint32_t>(size);
+}
+
+static uint32_t cached_runtime_image_size_bytes()
+{
+	static dw cached_loadseg = 0;
+	static uint32_t cached_size = 0;
+	if (cached_loadseg != runtime_loadseg || cached_size == 0) {
+		cached_loadseg = runtime_loadseg;
+		cached_size = compute_runtime_image_size_bytes();
+	}
+	return cached_size;
+}
+
+static inline bool in_runtime_image(dd linear)
+{
+	const uint32_t image_size = cached_runtime_image_size_bytes();
+	if (runtime_loadseg != 0 && image_size != 0) {
+		const dd start = static_cast<dd>(runtime_loadseg) << 4;
+		return linear >= start && linear < start + image_size;
+	}
+	return linear >= k_default_image_start && linear < k_default_image_end;
+}
+
+static bool looks_like_zstring(dd linear)
+{
+	if (!in_runtime_image(linear))
+		return false;
+	const db *mem = reinterpret_cast<const db *>(&m2c::m);
+	size_t printable = 0;
+	for (size_t i = 0; i < 64; ++i) {
+		const dd pos = linear + static_cast<dd>(i);
+		if (!in_runtime_image(pos))
+			return false;
+		const db ch = mem[pos];
+		if (ch == 0)
+			return printable >= 4;
+		if (ch < 0x20 || ch >= 0x7f)
+			return false;
+		++printable;
+	}
+	return false;
+}
+
+static std::vector<std::string> value_class_names(uint32_t mask)
+{
+	std::vector<std::string> names;
+	if (mask & RtValueDataOffset)
+		names.emplace_back("data_offset");
+	if (mask & RtValueCodeOffset)
+		names.emplace_back("code_offset");
+	if (mask & RtValueString)
+		names.emplace_back("string");
+	if (mask & RtValueSegment)
+		names.emplace_back("segment");
+	if (mask & RtValueFarPointer)
+		names.emplace_back("far_pointer");
+	if (names.empty())
+		names.emplace_back("unknown");
+	return names;
+}
+
+static uint32_t classify_runtime_value(uint64_t value,
+                                       size_t size,
+                                       std::vector<std::pair<dd, uint32_t>> &targets)
+{
+	X86_REGREF
+	uint32_t mask = RtValueUnknown;
+	if (size >= 2) {
+		const dw off = static_cast<dw>(value & 0xffffu);
+		const dd ds_target = (static_cast<dd>(ds) << 4) + off;
+		if (in_runtime_image(ds_target)) {
+			uint32_t cls = RtValueDataOffset;
+			if (looks_like_zstring(ds_target))
+				cls |= RtValueString;
+			mask |= cls;
+			targets.emplace_back(ds_target, cls);
+		}
+		const dd cs_target = (static_cast<dd>(cs) << 4) + off;
+		if (in_runtime_image(cs_target)) {
+			mask |= RtValueCodeOffset;
+			targets.emplace_back(cs_target, RtValueCodeOffset);
+		}
+		if (in_runtime_image(static_cast<dd>(off) << 4))
+			mask |= RtValueSegment;
+	}
+	if (size >= 4) {
+		const dw off = static_cast<dw>(value & 0xffffu);
+		const dw seg = static_cast<dw>((value >> 16u) & 0xffffu);
+		const dd far_target = (static_cast<dd>(seg) << 4) + off;
+		if (in_runtime_image(far_target)) {
+			uint32_t cls = RtValueFarPointer;
+			if (looks_like_zstring(far_target))
+				cls |= RtValueString;
+			mask |= cls;
+			targets.emplace_back(far_target, cls);
+		}
+	}
+	return mask;
+}
+
+static inline uint64_t pointer_evidence_key(dd source_addr, dd target_addr)
+{
+	return (static_cast<uint64_t>(source_addr) << 32u) | target_addr;
+}
+
+static inline uint64_t access_site_key(dd csip, size_t size, bool is_write)
+{
+	return (static_cast<uint64_t>(csip) << 8u) |
+	       (static_cast<uint64_t>(size & 0x7fu) << 1u) |
+	       (is_write ? 1u : 0u);
+}
+
+static void remember_pointer_candidate(dd source_addr,
+                                       dd producer_csip,
+                                       uint64_t value,
+                                       size_t size,
+                                       uint32_t flags)
+{
+	if (size < 2 || (flags & (RtValueDataOffset | RtValueCodeOffset | RtValueFarPointer)) == 0)
+		return;
+	X86_REGREF
+	const dw off = static_cast<dw>(value & 0xffffu);
+	PtrCandidate &candidate = ptr_candidate_cache[off & (k_ptr_candidate_cache_size - 1)];
+	candidate.valid = true;
+	candidate.source_addr = source_addr;
+	candidate.producer_csip = producer_csip;
+	candidate.value = off;
+	candidate.seg_context = ds;
+	candidate.flags = flags;
+	candidate.size = size;
+}
+} // namespace
 
 struct AbiSummary {
 	uint32_t calls = 0;
@@ -534,11 +715,11 @@ int custom_callf(Bitu CS, Bitu IP)
 		_state.call_source = 3;
 		const CPU_Regs abi_before_regs = cpu_regs;
 		const Segments abi_before_segs = Segs;
-		const dw abi_old_sp = sp;
+		const dw abi_old_sp = cpu_regs.regs[REGI_SP].word[W_INDEX];
 		const int ret = __dispatch_call((CS << 16) + IP, &_state);
 		m2c::abi_record_call_boundary((CS << 4) + IP, abi_before_regs,
 		                              abi_before_segs, cpu_regs, Segs,
-		                              static_cast<dw>(sp - abi_old_sp));
+		                              static_cast<dw>(cpu_regs.regs[REGI_SP].word[W_INDEX] - abi_old_sp));
 		return ret;
 	}
 
@@ -573,8 +754,10 @@ void custom_init(Section *sec)
 	m2c::_STATE *_state = 0;
 
 	// Register dump hotkey
-	MAPPER_AddHandler(m2c::DumpExe1, SDL_SCANCODE_F2, PRIMARY_MOD,
-	                  "dumpexe1", "Dumpexe1");
+	MAPPER_AddHandler(m2c::DumpMemorySnapshot, SDL_SCANCODE_F2, PRIMARY_MOD,
+	                  "memdump", "Memory snapshot (Ctrl+F2)");
+	MAPPER_AddHandler(m2c::DumpExe1, SDL_SCANCODE_F2, PRIMARY_MOD | MMOD2,
+	                  "memdump_raw", "Memory snapshot raw (Ctrl+Alt+F2)");
 	MAPPER_AddHandler(cycle_runtime_profile, SDL_SCANCODE_F3, PRIMARY_MOD,
 	                  "custprof", "Custom profile");
 	MAPPER_AddHandler(profile_analysis, SDL_SCANCODE_F4, PRIMARY_MOD,
@@ -1735,61 +1918,167 @@ void ShadowMemory::collect_selfmod(dw seg,
 	}
 }
 
-// Function to collect information about cross-segment jumps.
-void ShadowMemory::collect_cross_jumps(dw newcs, dd newip, FlowKind kind)
-{
-	// Reference the CPU registers.
-	X86_REGREF
+	// Function to collect information about cross-segment jumps.
+	void ShadowMemory::collect_cross_jumps(dw newcs, dd newip, FlowKind kind)
+	{
+		// Reference the CPU registers.
+		X86_REGREF
 
-	// Collect jump targets within a specific code segment range.
-	if (newcs >= 0x192 && newcs < 0xa000) {
-		const dd src = (cs << 4) + eip;
-		const dd dst = (newcs << 4) + newip;
-		m_jumps.insert(dst);
-		if (cs >= 0x192 && cs < 0xa000) {
-			if (m_code.find(src) == m_code.end()) {
-				m_code[src] = std::make_shared<Code>();
+		// Collect jump targets within a specific code segment range.
+		if (newcs >= 0x192 && newcs < 0xa000) {
+			const dd src = (cs << 4) + eip;
+			const dd dst = (newcs << 4) + newip;
+			m_jumps.insert(dst);
+			if (cs >= 0x192 && cs < 0xa000) {
+				if (m_code.find(src) == m_code.end()) {
+					m_code[src] = std::make_shared<Code>();
+				}
+				Code &c(*static_cast<Code *>(m_code.find(src)->second.get()));
+				++c.edge_to_count[dst];
+				c.edge_to_kind_mask[dst] |= (1u << static_cast<uint8_t>(kind));
 			}
-			Code &c(*static_cast<Code *>(m_code.find(src)->second.get()));
-			++c.edge_to_count[dst];
-			c.edge_to_kind_mask[dst] |= (1u << static_cast<uint8_t>(kind));
 		}
-	}
-}
-
-// Function to collect information about data accesses.
-void ShadowMemory::collect_data(dd b, size_t size, bool is_write)
-{
-	// Reference the CPU registers.
-	X86_REGREF
-
-	// Collect data access information within a specific memory range.
-	dd target = b;
-	if (target >= 0x1920 && target < 0xa0000) {
-		if (m_data.find(target) == m_data.end())
-			m_data[target] = std::make_shared<Data>();
-		Data &d(*static_cast<Data *>(m_data.find(target)->second.get()));
-		d.sizes.insert(size);
-		if (is_write) {
-			d.write_sizes.insert(size);
-			++d.write_count;
-		} else {
-			d.read_sizes.insert(size);
-			++d.read_count;
+		PtrCandidate &candidate = ptr_candidate_cache[newip & (k_ptr_candidate_cache_size - 1)];
+		if (candidate.valid && candidate.value == static_cast<dw>(newip)) {
+			const dd use = (cs >= 0x192 && cs < 0xa000) ? ((cs << 4) + eip) : 0;
+			record_pointer_use(candidate.source_addr,
+			                   (static_cast<dd>(newcs) << 4) + newip,
+			                   candidate.producer_csip, use, candidate.value,
+			                   candidate.size, RtValueCodeOffset);
 		}
 	}
 
-	// Collect data access information for code addresses within a specific
-	// range.
-	if (cs >= 0x192 && cs < 0xa000) {
-		dd csip = (cs << 4) + eip;
-		if (m_code.find(csip) == m_code.end())
-			m_code[csip] = std::make_shared<Code>();
-		Code &c(*static_cast<Code *>(m_code.find(csip)->second.get()));
-		c.m_video = isaddrbelongtovga(b);
-		c.accessingdata.insert(target);
+	void ShadowMemory::record_pointer_use(dd source_addr,
+	                                      dd target_addr,
+	                                      dd producer_csip,
+	                                      dd use_csip,
+	                                      uint64_t value,
+	                                      size_t size,
+	                                      uint32_t flags)
+	{
+		if (source_addr == 0 || target_addr == 0)
+			return;
+		PtrEvidence &e = m_pointer_evidence[pointer_evidence_key(source_addr, target_addr)];
+		e.source_addr = source_addr;
+		e.target_addr = target_addr;
+		e.producer_csip = producer_csip;
+		e.use_csip = use_csip;
+		e.value = value;
+		e.size = size;
+		e.flags |= flags;
+		if (e.count < std::numeric_limits<size_t>::max())
+			++e.count;
 	}
-}
+
+	void ShadowMemory::update_access_site(dd csip,
+	                                      dd addr,
+	                                      size_t size,
+	                                      bool is_write,
+	                                      uint64_t value,
+	                                      bool has_value,
+	                                      uint32_t value_class_mask)
+	{
+		if (csip == 0)
+			return;
+		AccessSite &site = m_access_sites[access_site_key(csip, size, is_write)];
+		site.csip = csip;
+		site.min_addr = std::min(site.min_addr, addr);
+		site.max_addr = std::max(site.max_addr, addr);
+		site.size_mask |= size_to_mask(size);
+		site.rw_mask |= is_write ? 2u : 1u;
+		site.value_class_mask |= value_class_mask;
+		if (site.count != 0 && site.last_addr != addr) {
+			const uint32_t delta = site.last_addr > addr ? site.last_addr - addr : addr - site.last_addr;
+			site.gcd_delta = site.gcd_delta == 0 ? delta : gcd32(site.gcd_delta, delta);
+		}
+		site.last_addr = addr;
+		if (site.seen_addrs.insert(addr).second)
+			++site.distinct_count;
+		if (has_value && site.samples.size() < k_access_sample_limit) {
+			AccessSample sample;
+			sample.addr = addr;
+			sample.value = value;
+			sample.value_class_mask = value_class_mask;
+			site.samples.push_back(sample);
+		}
+		if (site.count < std::numeric_limits<size_t>::max())
+			++site.count;
+	}
+
+	// Function to collect information about data accesses.
+	void ShadowMemory::collect_data(dd b, size_t size, bool is_write, uint64_t value, bool has_value)
+	{
+		// Reference the CPU registers.
+		X86_REGREF
+
+		// Collect data access information within a specific memory range.
+		dd target = b;
+		const dd csip = current_csip();
+		std::vector<std::pair<dd, uint32_t>> value_targets;
+		uint32_t value_class_mask = RtValueUnknown;
+		if (has_value && (size == 2 || size == 4 || size == 8))
+			value_class_mask = classify_runtime_value(value, size, value_targets);
+
+		PtrCandidate &candidate = ptr_candidate_cache[(target & 0xffffu) & (k_ptr_candidate_cache_size - 1)];
+		if (candidate.valid && candidate.value == static_cast<dw>(target & 0xffffu)) {
+			const dd expected = (static_cast<dd>(candidate.seg_context) << 4) + candidate.value;
+			if (expected == target) {
+				record_pointer_use(candidate.source_addr, target,
+				                   candidate.producer_csip, csip,
+				                   candidate.value, candidate.size,
+				                   RtValueDataOffset);
+			}
+		}
+
+		update_access_site(csip, target, size, is_write, value, has_value,
+		                   value_class_mask);
+
+		if (target >= 0x1920 && target < 0xa0000) {
+			if (m_data.find(target) == m_data.end())
+				m_data[target] = std::make_shared<Data>();
+			Data &d(*static_cast<Data *>(m_data.find(target)->second.get()));
+			d.sizes.insert(size);
+			d.value_class_mask |= value_class_mask;
+			for (const auto &[value_target, cls] : value_targets) {
+				++d.value_target_count[value_target];
+				d.value_target_class_mask[value_target] |= cls;
+			}
+			if (is_write) {
+				d.write_sizes.insert(size);
+				++d.write_count;
+			} else {
+				d.read_sizes.insert(size);
+				++d.read_count;
+			}
+			if (!is_write && has_value && (value_class_mask & (RtValueDataOffset | RtValueCodeOffset | RtValueFarPointer)) != 0)
+				remember_pointer_candidate(target, csip, value, size, value_class_mask);
+		}
+
+		// Collect data access information for code addresses within a specific
+		// range.
+		if (cs >= 0x192 && cs < 0xa000) {
+			dd csip = (cs << 4) + eip;
+			if (m_code.find(csip) == m_code.end())
+				m_code[csip] = std::make_shared<Code>();
+			Code &c(*static_cast<Code *>(m_code.find(csip)->second.get()));
+			c.m_video = isaddrbelongtovga(b);
+			c.accessingdata.insert(target);
+		}
+	}
+
+	void rt_collect_memory_read(dd address, uint8_t size, uint64_t value)
+	{
+		if (!collect_rt_info || !collect_rt_info_vars)
+			return;
+		shadow_memory.collect_data(address, size, false, value, true);
+	}
+
+	void rt_collect_memory_write(dd address, uint8_t size, uint64_t value)
+	{
+		if (!collect_rt_info || !collect_rt_info_vars)
+			return;
+		shadow_memory.collect_data(address, size, true, value, true);
+	}
 
 // Function to dump the collected run-time information to a JSON file.
 void ShadowMemory::dump()
@@ -1824,18 +2113,31 @@ void ShadowMemory::dump()
 	fclose(f);
 	printf("Saved json\n");
 
-	m_data.clear();
-	m_code.clear();
-	m_jumps.clear();
-	abi_summary.clear();
+		m_data.clear();
+		m_code.clear();
+		m_pointer_evidence.clear();
+		m_access_sites.clear();
+		m_jumps.clear();
+		abi_summary.clear();
 	//       printf("%s\n",j.dump(3).c_str());
 }
 
-// JSON serialization function for the Code structure.
-void to_json(nlohmann::json &nlohmann_json_j, const Code &c)
-{
-	nlohmann_json_j["es"] = c.m_segs[(size_t)Byte::SegNames::es];
-	nlohmann_json_j["cs"] = c.m_segs[(size_t)Byte::SegNames::cs];
+	// Function to convert an integer to a hexadecimal string.
+	template <typename T>
+	std::string int_to_hex(T i)
+	{
+		std::stringstream stream;
+		stream << "0x"
+		       //         << std::setfill ('0') << std::setw(sizeof(T)*2)
+		       << std::hex << i;
+		return stream.str();
+	}
+
+	// JSON serialization function for the Code structure.
+	void to_json(nlohmann::json &nlohmann_json_j, const Code &c)
+	{
+		nlohmann_json_j["es"] = c.m_segs[(size_t)Byte::SegNames::es];
+		nlohmann_json_j["cs"] = c.m_segs[(size_t)Byte::SegNames::cs];
 	nlohmann_json_j["ss"] = c.m_segs[(size_t)Byte::SegNames::ss];
 	nlohmann_json_j["ds"] = c.m_segs[(size_t)Byte::SegNames::ds];
 	nlohmann_json_j["fs"] = c.m_segs[(size_t)Byte::SegNames::fs];
@@ -1856,45 +2158,80 @@ void to_json(nlohmann::json &nlohmann_json_j, const Code &c)
 	nlohmann_json_j["Accdat"] = c.accessingdata;
 	nlohmann_json_j["Edges"] = c.edge_to_count;
 	nlohmann_json_j["EdgeKinds"] = c.edge_to_kind_mask;
-}
-
-// JSON serialization function for the Data structure.
-void to_json(nlohmann::json &nlohmann_json_j, const Data &nlohmann_json_t)
-{
-	nlohmann_json_j["Sizes"] = nlohmann_json_t.sizes;
-	nlohmann_json_j["ReadSizes"] = nlohmann_json_t.read_sizes;
-	nlohmann_json_j["WriteSizes"] = nlohmann_json_t.write_sizes;
-	nlohmann_json_j["ReadCount"] = nlohmann_json_t.read_count;
-	nlohmann_json_j["WriteCount"] = nlohmann_json_t.write_count;
-	//	if (nlohmann_json_t.m_array)
-	nlohmann_json_j["Array"] = nlohmann_json_t.m_array;
-}
-
-// Function to convert an integer to a hexadecimal string.
-template <typename T>
-std::string int_to_hex(T i)
-{
-	std::stringstream stream;
-	stream << "0x"
-	       //         << std::setfill ('0') << std::setw(sizeof(T)*2)
-	       << std::hex << i;
-	return stream.str();
-}
-
-// JSON serialization function for the ShadowMemory class.
-void to_json(nlohmann::json &nlohmann_json_j, const ShadowMemory &nlohmann_json_t)
-{
-	for (auto &[key, value] : nlohmann_json_t.m_code) {
-		const Byte *b = value.get();
-		const Code *c = static_cast<const Code *>(b);
-		nlohmann_json_j["Code"][int_to_hex(key)] = *c;
 	}
-	for (auto &[key, value] : nlohmann_json_t.m_data) {
-		const Byte *b = value.get();
-		const Data *d = static_cast<const Data *>(b);
-		nlohmann_json_j["Data"][int_to_hex(key)] = *d;
+
+	// JSON serialization function for the Data structure.
+	void to_json(nlohmann::json &nlohmann_json_j, const Data &nlohmann_json_t)
+	{
+		nlohmann_json_j["Sizes"] = nlohmann_json_t.sizes;
+		nlohmann_json_j["ReadSizes"] = nlohmann_json_t.read_sizes;
+		nlohmann_json_j["WriteSizes"] = nlohmann_json_t.write_sizes;
+		nlohmann_json_j["ReadCount"] = nlohmann_json_t.read_count;
+		nlohmann_json_j["WriteCount"] = nlohmann_json_t.write_count;
+		nlohmann_json_j["ValueClassMask"] = nlohmann_json_t.value_class_mask;
+		nlohmann_json_j["ValueClasses"] = value_class_names(nlohmann_json_t.value_class_mask);
+		nlohmann_json_j["ValueTargets"] = nlohmann_json_t.value_target_count;
+		nlohmann_json_j["ValueTargetClasses"] = nlohmann_json_t.value_target_class_mask;
+		//	if (nlohmann_json_t.m_array)
+		nlohmann_json_j["Array"] = nlohmann_json_t.m_array;
 	}
-	nlohmann_json_j["Jumps"] = nlohmann_json_t.m_jumps;
+
+	void to_json(nlohmann::json &nlohmann_json_j, const PtrEvidence &e)
+	{
+		nlohmann_json_j["SourceAddr"] = int_to_hex(e.source_addr);
+		nlohmann_json_j["TargetAddr"] = int_to_hex(e.target_addr);
+		nlohmann_json_j["ProducerCsip"] = int_to_hex(e.producer_csip);
+		nlohmann_json_j["UseCsip"] = int_to_hex(e.use_csip);
+		nlohmann_json_j["Count"] = e.count;
+		nlohmann_json_j["Flags"] = e.flags;
+		nlohmann_json_j["Classes"] = value_class_names(e.flags);
+		nlohmann_json_j["Size"] = e.size;
+		nlohmann_json_j["Value"] = e.value;
+	}
+
+	void to_json(nlohmann::json &nlohmann_json_j, const AccessSample &s)
+	{
+		nlohmann_json_j["Addr"] = int_to_hex(s.addr);
+		nlohmann_json_j["Value"] = s.value;
+		nlohmann_json_j["ValueClassMask"] = s.value_class_mask;
+		nlohmann_json_j["ValueClasses"] = value_class_names(s.value_class_mask);
+	}
+
+	void to_json(nlohmann::json &nlohmann_json_j, const AccessSite &s)
+	{
+		nlohmann_json_j["Csip"] = int_to_hex(s.csip);
+		nlohmann_json_j["MinAddr"] = int_to_hex(s.min_addr);
+		nlohmann_json_j["MaxAddr"] = int_to_hex(s.max_addr);
+		nlohmann_json_j["GcdDelta"] = s.gcd_delta;
+		nlohmann_json_j["Count"] = s.count;
+		nlohmann_json_j["DistinctCount"] = s.distinct_count;
+		nlohmann_json_j["SizeMask"] = s.size_mask;
+		nlohmann_json_j["RwMask"] = s.rw_mask;
+		nlohmann_json_j["ValueClassMask"] = s.value_class_mask;
+		nlohmann_json_j["ValueClasses"] = value_class_names(s.value_class_mask);
+		nlohmann_json_j["Samples"] = s.samples;
+	}
+
+	// JSON serialization function for the ShadowMemory class.
+	void to_json(nlohmann::json &nlohmann_json_j, const ShadowMemory &nlohmann_json_t)
+	{
+		for (auto &[key, value] : nlohmann_json_t.m_code) {
+			const Byte *b = value.get();
+			const Code *c = static_cast<const Code *>(b);
+			nlohmann_json_j["Code"][int_to_hex(key)] = *c;
+		}
+		for (auto &[key, value] : nlohmann_json_t.m_data) {
+			const Byte *b = value.get();
+			const Data *d = static_cast<const Data *>(b);
+			nlohmann_json_j["Data"][int_to_hex(key)] = *d;
+		}
+		for (const auto &[key, value] : nlohmann_json_t.m_pointer_evidence) {
+			nlohmann_json_j["PointerEvidence"][int_to_hex(key)] = value;
+		}
+		for (const auto &[key, value] : nlohmann_json_t.m_access_sites) {
+			nlohmann_json_j["AccessSites"][int_to_hex(key)] = value;
+		}
+		nlohmann_json_j["Jumps"] = nlohmann_json_t.m_jumps;
 	nlohmann_json_j["Meta"]["DosboxLoadSeg"] = runtime_loadseg;
 	nlohmann_json_j["Meta"]["ImageSizeBytes"] = compute_runtime_image_size_bytes();
 	for (const auto &[addr, s] : abi_summary) {

@@ -78,7 +78,7 @@ function(setConfig01 VAR VALUE)
 	set(${VAR} ${VALUE} PARENT_SCOPE)
 endfunction()
 
-if (CMAKE_SYSTEM_PROCESSOR STREQUAL "AMD64")
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "AMD64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
 	set(C_TARGETCPU "X86_64")
 else()
 	message(FATAL_ERROR "Unknown processor ${CMAKE_SYSTEM_PROCESSOR}")
@@ -183,13 +183,110 @@ if (DOSBOX_COMPILER_MSVC)
 endif()
 
 add_executable(dosbox src/main.cpp src/dosbox.cpp)
+set(DOSBOX_CUSTOM_PROFILE "f15" CACHE STRING "Custom runtime profile to link (from src/custom/src_<profile>)")
+set(_DOSBOX_CUSTOM_BASE_DIR "${CMAKE_CURRENT_LIST_DIR}/src/custom")
+
+file(GLOB _DOSBOX_CUSTOM_PROFILE_DIRS
+	LIST_DIRECTORIES TRUE
+	CONFIGURE_DEPENDS
+	"${_DOSBOX_CUSTOM_BASE_DIR}/src_*"
+)
+
+set(_DOSBOX_CUSTOM_AVAILABLE_PROFILES)
+foreach(_DOSBOX_CUSTOM_PROFILE_DIR IN LISTS _DOSBOX_CUSTOM_PROFILE_DIRS)
+	get_filename_component(_DOSBOX_CUSTOM_PROFILE_NAME
+		"${_DOSBOX_CUSTOM_PROFILE_DIR}"
+		NAME
+	)
+	string(REPLACE "src_" "" _DOSBOX_CUSTOM_PROFILE_NAME "${_DOSBOX_CUSTOM_PROFILE_NAME}")
+	list(APPEND _DOSBOX_CUSTOM_AVAILABLE_PROFILES "${_DOSBOX_CUSTOM_PROFILE_NAME}")
+endforeach()
+list(REMOVE_DUPLICATES _DOSBOX_CUSTOM_AVAILABLE_PROFILES)
+list(SORT _DOSBOX_CUSTOM_AVAILABLE_PROFILES)
+
+if (_DOSBOX_CUSTOM_AVAILABLE_PROFILES)
+	set_property(CACHE DOSBOX_CUSTOM_PROFILE PROPERTY STRINGS
+		${_DOSBOX_CUSTOM_AVAILABLE_PROFILES}
+	)
+endif()
+
+set(_DOSBOX_CUSTOM_RUNTIME_PROFILE_DIR "${_DOSBOX_CUSTOM_BASE_DIR}/src_${DOSBOX_CUSTOM_PROFILE}")
+if (NOT IS_DIRECTORY "${_DOSBOX_CUSTOM_RUNTIME_PROFILE_DIR}" AND
+	IS_DIRECTORY "${_DOSBOX_CUSTOM_BASE_DIR}/${DOSBOX_CUSTOM_PROFILE}")
+	set(_DOSBOX_CUSTOM_RUNTIME_PROFILE_DIR "${_DOSBOX_CUSTOM_BASE_DIR}/${DOSBOX_CUSTOM_PROFILE}")
+endif()
+if (NOT IS_DIRECTORY "${_DOSBOX_CUSTOM_RUNTIME_PROFILE_DIR}" AND
+	DOSBOX_CUSTOM_PROFILE STREQUAL "src" AND
+	IS_DIRECTORY "${_DOSBOX_CUSTOM_BASE_DIR}/src")
+	set(_DOSBOX_CUSTOM_RUNTIME_PROFILE_DIR "${_DOSBOX_CUSTOM_BASE_DIR}/src")
+endif()
+
+if (NOT IS_DIRECTORY "${_DOSBOX_CUSTOM_RUNTIME_PROFILE_DIR}")
+	string(REPLACE ";" ", " _DOSBOX_CUSTOM_AVAILABLE_LIST "${_DOSBOX_CUSTOM_AVAILABLE_PROFILES}")
+	message(FATAL_ERROR
+		"Unsupported DOSBOX_CUSTOM_PROFILE='${DOSBOX_CUSTOM_PROFILE}'. "
+		"Available profiles: ${_DOSBOX_CUSTOM_AVAILABLE_LIST}"
+	)
+endif()
+
+file(GLOB DOSBOX_CUSTOM_GAME_SOURCES
+	"${_DOSBOX_CUSTOM_RUNTIME_PROFILE_DIR}/*.cpp"
+)
+if (NOT DOSBOX_CUSTOM_GAME_SOURCES)
+	message(FATAL_ERROR
+		"No .cpp files found in custom profile directory '${_DOSBOX_CUSTOM_RUNTIME_PROFILE_DIR}'. "
+		"Make sure the profile directory contains the converted source files."
+	)
+endif()
+list(SORT DOSBOX_CUSTOM_GAME_SOURCES)
+
+set(DOSBOX_CUSTOM_SOURCES
+	${_DOSBOX_CUSTOM_BASE_DIR}/custom.cpp
+	${_DOSBOX_CUSTOM_BASE_DIR}/custom_compat.cpp
+	${_DOSBOX_CUSTOM_BASE_DIR}/segfault.cpp
+	${_DOSBOX_CUSTOM_BASE_DIR}/shadowstack.cpp
+	${_DOSBOX_CUSTOM_BASE_DIR}/utils.cpp
+	src/custom/dumpexe.cpp
+	${DOSBOX_CUSTOM_GAME_SOURCES}
+)
+target_sources(dosbox PRIVATE ${DOSBOX_CUSTOM_SOURCES})
 target_include_directories(dosbox PUBLIC include ${CMAKE_CURRENT_BINARY_DIR}/include)
+
+set_source_files_properties(
+	${DOSBOX_CUSTOM_SOURCES}
+	PROPERTIES COMPILE_DEFINITIONS DOSBOX_CUSTOM=1
+)
 
 # TODO: This happens on every execution, better to have a target with dependencies instead
 add_custom_target(copy_assets
 		COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_LIST_DIR}/contrib/resources ${CMAKE_CURRENT_BINARY_DIR}
 )
 add_dependencies(dosbox copy_assets)
+
+set(_DOSBOX_LOCAL_CMAKE_PREFIX)
+foreach(_dep_prefix IN ITEMS
+		${CMAKE_CURRENT_LIST_DIR}/build_iir_install
+		${CMAKE_CURRENT_LIST_DIR}/build_iir_install_prefix
+		${CMAKE_CURRENT_LIST_DIR}/build_sdl2_net_install
+		${CMAKE_CURRENT_LIST_DIR}/build_opusfile_install
+		${CMAKE_CURRENT_LIST_DIR}/build_fluidsynth_install
+		${CMAKE_CURRENT_LIST_DIR}/build_mt32emu_install
+		${CMAKE_CURRENT_LIST_DIR}/build_iir
+)
+	if (IS_DIRECTORY "${_dep_prefix}")
+		list(APPEND _DOSBOX_LOCAL_CMAKE_PREFIX "${_dep_prefix}")
+	endif()
+endforeach()
+
+if (_DOSBOX_LOCAL_CMAKE_PREFIX)
+	set(_DOSBOX_PREFIX_PATH_LIST)
+	if (CMAKE_PREFIX_PATH)
+		list(APPEND _DOSBOX_PREFIX_PATH_LIST ${CMAKE_PREFIX_PATH})
+	endif()
+	list(PREPEND _DOSBOX_PREFIX_PATH_LIST ${_DOSBOX_LOCAL_CMAKE_PREFIX})
+	list(REMOVE_DUPLICATES _DOSBOX_PREFIX_PATH_LIST)
+	list(JOIN _DOSBOX_PREFIX_PATH_LIST ";" CMAKE_PREFIX_PATH)
+endif()
 
 find_package(PkgConfig REQUIRED)
 if (DOSBOX_PLATFORM_LINUX)
@@ -249,6 +346,7 @@ target_link_libraries(dosbox PRIVATE
 		$<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
 		$<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
 
+		libdebug
 		libcapture
 		libcpu
 		libdos
