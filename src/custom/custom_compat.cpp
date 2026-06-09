@@ -88,7 +88,15 @@ bool abi_collection_mode = false;
 
 #if !DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 struct Memory {
-	db data[16 * 1024 * 1024] = {};
+	db *operator&()
+	{
+		return MemBase;
+	}
+
+	const db *operator&() const
+	{
+		return MemBase;
+	}
 };
 
 Memory m;
