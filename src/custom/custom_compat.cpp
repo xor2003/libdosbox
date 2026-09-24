@@ -115,4 +115,30 @@ bool __dispatch_call(m2c::_offsets, m2c::_STATE *)
 {
 	return false;
 }
+
+// asm.cpp is only linked into game-dispatch profiles; provide the same
+// weak fallbacks for pure-instrumentation builds.
+namespace m2c {
+__attribute__((weak)) db *linked_code_segment_raddr(dw, dw)
+{
+	return nullptr;
+}
+__attribute__((weak)) db *linked_data_segment_raddr(dw, dw)
+{
+	return nullptr;
+}
+__attribute__((weak)) void set_segment_register(dw &reg, dw value)
+{
+	reg = value;
+}
+__attribute__((weak)) void copy_linked_program_segment_prefix(dw, const void *, size_t)
+{
+}
+__attribute__((weak)) bool dispatch_external_code(_offsets, _STATE *, bool *handled)
+{
+	if (handled)
+		*handled = false;
+	return false;
+}
+} // namespace m2c
 #endif

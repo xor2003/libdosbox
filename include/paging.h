@@ -25,7 +25,7 @@
 
 #include "mem.h"
 
-#if defined(DOSBOX_CUSTOM)
+#if DOSBOX_CUSTOM
 extern bool collect_rt_info;
 extern bool collect_rt_info_vars;
 namespace m2c {

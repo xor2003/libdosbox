@@ -21,12 +21,16 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <array>
+#include <chrono>
 
 #include "bios.h"
 #include "callback.h"
+#include "custom.h"
 #include "dos_locale.h"
 #include "drives.h"
 #include "mem.h"
@@ -50,6 +54,45 @@ static bool is_guest_booted = false;
 
 extern void DOS_ClearLaunchedProgramNames();
 
+namespace {
+bool dos_trace_enabled()
+{
+	static const bool enabled = []() {
+		const auto *value = std::getenv("DOSBOX_TRACE_EXEC");
+		return value && *value && std::strcmp(value, "0") != 0;
+	}();
+	return enabled;
+}
+
+void dos_trace_log(const char *format, ...)
+{
+	if (!dos_trace_enabled())
+		return;
+
+	using namespace std::chrono;
+	const auto now = system_clock::now();
+	const auto time = system_clock::to_time_t(now);
+	const auto ms = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+
+	std::tm tm_buf = {};
+	localtime_r(&time, &tm_buf);
+
+	char timestamp[32] = {};
+	std::strftime(timestamp, sizeof(timestamp), "%F %T", &tm_buf);
+
+	std::fprintf(stderr, "%s.%03lld | DOS-TRACE: ",
+	             timestamp, static_cast<long long>(ms.count()));
+
+	va_list args;
+	va_start(args, format);
+	std::vfprintf(stderr, format, args);
+	va_end(args);
+
+	std::fputc('\n', stderr);
+	std::fflush(stderr);
+}
+} // namespace
+
 void DOS_NotifyBooting()
 {
 	is_guest_booted = true;
@@ -66,6 +109,8 @@ uint8_t dos_copybuf[DOS_COPYBUFSIZE];
 
 void DOS_SetError(uint16_t code) {
 	dos.errorcode=code;
+	dos_trace_log("seterror ah=%02x code=%04x psp=%04x cs:ip=%04x:%04x",
+	              reg_ah, code, dos.psp(), SegValue(cs), reg_ip);
 }
 
 uint16_t DOS_GetBiosTimePacked()
@@ -180,7 +225,9 @@ static Bitu DOS_21Handler(void) {
 
 	switch (reg_ah) {
 	case 0x00:		/* Terminate Program */
-		DOS_Terminate(real_readw(SegValue(ss),reg_sp+2),false,0);
+		dos_trace_log("int21 ah=00 terminate psp=%04x cs=%04x ss:sp=%04x:%04x",
+		              dos.psp(), SegValue(cs), SegValue(ss), reg_sp);
+		DOS_Terminate(dos.psp(), false, 0);
 		break;
 	case 0x01:		/* Read character from STDIN, with echo */
 		{	
@@ -907,15 +954,20 @@ static Bitu DOS_21Handler(void) {
 		{
 			result_errorcode = 0;
 			MEM_StrCopy(SegPhys(ds)+reg_dx,name1,DOSNAMEBUF);
+			dos_trace_log("int21 ah=4b exec mode=%02x psp=%04x name=%s param=%04x:%04x",
+			              reg_al, dos.psp(), name1, SegValue(es), reg_bx);
+			custom_note_exec_request(name1, reg_al, SegValue(cs), reg_ip, dos.psp());
 			LOG(LOG_EXEC,LOG_ERROR)("Execute %s %d",name1,reg_al);
 			if (!DOS_Execute(name1,SegPhys(es)+reg_bx,reg_al)) {
 				reg_ax=dos.errorcode;
+				dos_trace_log("int21 ah=4b failed name=%s error=%04x", name1, reg_ax);
 				CALLBACK_SCF(true);
 			}
 		}
 		break;
 //TODO Check for use of execution state AL=5
 	case 0x4c:					/* EXIT Terminate with return code */
+		dos_trace_log("int21 ah=4c terminate psp=%04x exitcode=%02x", dos.psp(), reg_al);
 		DOS_Terminate(dos.psp(),false,reg_al);
 		if (result_errorcode)
 			dos.return_code = result_errorcode;

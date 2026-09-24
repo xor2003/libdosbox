@@ -17,9 +17,11 @@
 #include <unistd.h>
 #include <array>
 #include <chrono>
+#include <csignal>
 #include <limits>
 #include <sstream>
 #include <cctype>
+#include <cstdarg>
 #include <ctime>
 
 #ifndef DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
@@ -146,7 +148,7 @@ struct CollectOnlyProfile final : RuntimeProfileStrategy {
 		trace_instructions = false;
 		trace_instructions_to_stdout = false;
 		complex_self_modifications = false;
-		collect_rt_info = true;
+		collect_rt_info = false;
 		collect_rt_info_vars = false;
 	}
 };
@@ -167,6 +169,32 @@ void print_runtime_modes()
 	           collect_rt_info ? 1 : 0, collect_rt_info_vars ? 1 : 0,
 	           complex_self_modifications ? 1 : 0,
 	           abi_collection_mode ? 1 : 0);
+}
+
+std::string parent_dir_from_path(const char *path)
+{
+	if (!path || !*path)
+		return {};
+
+	const std::string value(path);
+	if (value.size() >= 2 && std::isalpha(static_cast<unsigned char>(value[0])) &&
+	    value[1] == ':') {
+		return {};
+	}
+
+	const auto pos = value.find_last_of("/\\");
+	if (pos == std::string::npos)
+		return {};
+	if (pos == 0)
+		return value.substr(0, 1);
+	return value.substr(0, pos);
+}
+
+std::string output_path_for(const std::string &file_name)
+{
+	if (m2c::output_dir.empty() || m2c::output_dir == ".")
+		return file_name;
+	return m2c::output_dir + "/" + file_name;
 }
 
 const RuntimeProfileStrategy *profile_by_id(RuntimeProfile p)
@@ -317,6 +345,9 @@ extern Bitu Normal_Loop(void);
 // Counter for the number of custom runs.
 int custom_runs = 0;
 
+// PSP values for currently tracked program runs.
+std::vector<uint16_t> active_target_psps;
+
 // Variable to store the old CPU cycle count.
 Bitu old_cycles;
 // Stack to store return points for function calls.
@@ -356,6 +387,7 @@ extern void Initializer();
 #endif
 // Class to manage shadow memory for run-time information.
 ShadowMemory shadow_memory;
+dd rt_insn_linear = 0;
 
 } // namespace m2c
 
@@ -409,8 +441,6 @@ namespace m2c {
 
 // Flag to defer IRQs.
 bool defered_irqs = false;
-// Name of the executable being run.
-std::string exename;
 // Runtime EXE load segment selected by DOSBox.
 dw runtime_loadseg = 0;
 // Function to print collected traces.
@@ -665,7 +695,6 @@ void abi_record_call_boundary(dd callee_linear,
 // Function to dump the stack and shadow memory.
 void stackDumpZ()
 {
-	custom_log("atexit handler");
 	m2c::shadow_memory.dump();
 	stackDump(0);
 }
@@ -676,8 +705,23 @@ void stackDumpZ()
 void loguru_fatal(const loguru::Message &message)
 {
 	(void)message;
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 	m2c::stackDumpZ();
+#else
+	m2c::shadow_memory.dump();
+#endif
 }
+
+#if !DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
+// Dump collected run-time info when the process is asked to terminate, so an
+// agent can collect a trace from a program that never exits on its own.
+static void runtime_dump_signal_handler(int sig)
+{
+	m2c::shadow_memory.dump();
+	signal(sig, SIG_DFL);
+	raise(sig);
+}
+#endif
 
 // Custom initialization function for DOSBox programs.
 void custom_init_prog(char *name, uint16_t relocate, uint16_t init_cs, uint16_t init_ip)
@@ -692,8 +736,13 @@ void custom_init_prog(char *name, uint16_t relocate, uint16_t init_cs, uint16_t 
 	 */
 	static bool registered = false;
 	if (!registered) {
+#if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 		loguru::set_fatal_handler(loguru_fatal);
 		atexit(m2c::stackDumpZ); // Register exit handler for final report
+#else
+		signal(SIGTERM, runtime_dump_signal_handler);
+		signal(SIGINT, runtime_dump_signal_handler);
+#endif
 		registered = true;
 	}
 
@@ -704,29 +753,68 @@ void custom_init_prog(char *name, uint16_t relocate, uint16_t init_cs, uint16_t 
 		           name ? name : "", relocate, init_cs, init_ip);
 		custom_runs++;
 		init_runs++;
+		active_target_psps.push_back(dos.psp());
 	}
 #else
 	custom_log("instrument init program: name=%s relocate=%04x entry=%04x:%04x",
 	           name ? name : "", relocate, init_cs, init_ip);
-	(void)name;
+	// Instrument build: treat every executed program as a collection target
+	// so its run-time info is gathered and dumped on exit.
+	custom_runs++;
+	init_runs++;
+	active_target_psps.push_back(dos.psp());
 	(void)relocate;
 	(void)init_cs;
 	(void)init_ip;
 #endif
 }
 
-// Custom exit function for DOSBox programs.
-void custom_exit_prog(uint8_t exitcode)
+void custom_note_host_program_path(const char *path)
 {
-	// Dump shadow memory (final analysis report)
-	m2c::shadow_memory.dump();
+	const auto new_output_dir = parent_dir_from_path(path);
+	if (new_output_dir.empty())
+		return;
 
+	m2c::output_dir = new_output_dir;
+	custom_log("host program path: source=%s output_dir=%s",
+	           path ? path : "", m2c::output_dir.c_str());
+}
+
+void custom_note_exec_request(char *name,
+                              uint8_t mode,
+                              uint16_t caller_cs,
+                              uint16_t caller_ip,
+                              uint16_t parent_psp)
+{
+	m2c::dumpexe_note_exec_request(name, mode, caller_cs, caller_ip, parent_psp);
+}
+
+// Custom exit function for DOSBox programs.
+void custom_exit_prog(uint8_t exitcode, uint16_t psp_seg)
+{
 	// Check if it was a target binary.
 	if (!custom_runs) {
 		custom_log("exit program ignored: no target binary active exitcode=%u",
 		           static_cast<unsigned>(exitcode));
 		return;
 	}
+	if (active_target_psps.empty()) {
+		custom_log("exit program ignored: no tracked target program, psp=%04x exitcode=%u",
+		           psp_seg, static_cast<unsigned>(exitcode));
+		return;
+	}
+	if (active_target_psps.back() != psp_seg) {
+		custom_log("exit program ignored: psp=%04x exitcode=%u active_psp=%04x"
+		           ", active_runs=%d init_runs=%d",
+		           psp_seg, static_cast<unsigned>(exitcode),
+		           active_target_psps.back(), custom_runs, init_runs);
+		return;
+	}
+
+	active_target_psps.pop_back();
+
+	// Dump shadow memory (final analysis report) only for tracked runs.
+	m2c::shadow_memory.dump();
 
 	custom_runs--;
 	// Perform deinitialization if needed.
@@ -734,13 +822,30 @@ void custom_exit_prog(uint8_t exitcode)
 		custom_log("target deinit exitcode=%u", static_cast<unsigned>(exitcode));
 #if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 		masm2c_exit(exitcode);
-		exit(0);
 #else
 		(void)exitcode;
 #endif
 
 		init_runs--;
 	}
+}
+
+void custom_exit_section()
+{
+	if (!custom_runs) {
+		custom_log("section exit: no active target binary");
+		return;
+	}
+	if (!active_target_psps.empty()) {
+		active_target_psps.clear();
+	}
+	m2c::shadow_memory.dump();
+	if (init_runs) {
+		custom_log("section exit: forced deinit");
+		masm2c_exit(0);
+		init_runs = 0;
+	}
+	custom_runs = 0;
 }
 
 // Custom call function for handling translated function calls.
@@ -789,7 +894,7 @@ int custom_callf(Bitu CS, Bitu IP)
 static void custom_exit(Section *sec)
 {
 	(void)sec;
-	custom_exit_prog(0); // Cleanup on section exit
+	custom_exit_section(); // Cleanup on section exit
 }
 
 // Custom initialization function for DOSBox sections.
@@ -813,11 +918,10 @@ void custom_init(Section *sec)
 	X86_REGREF
 	m2c::_STATE *_state = 0;
 
-	// Register dump hotkey
-	MAPPER_AddHandler(m2c::DumpMemorySnapshot, SDL_SCANCODE_F2, PRIMARY_MOD,
-	                  "memdump", "Memory snapshot (Ctrl+F2)");
-	MAPPER_AddHandler(m2c::DumpExe1, SDL_SCANCODE_F2, PRIMARY_MOD | MMOD2,
-	                  "memdump_raw", "Memory snapshot raw (Ctrl+Alt+F2)");
+	// Register dumpexe hotkey away from F2 to avoid shader-reload collisions
+	MAPPER_AddHandler(m2c::DumpExe1, SDL_SCANCODE_0,
+	                  PRIMARY_MOD,
+	                  "memdump", "Dump EXE (Ctrl+0)");
 	MAPPER_AddHandler(cycle_runtime_profile, SDL_SCANCODE_F3, PRIMARY_MOD,
 	                  "custprof", "Custom profile");
 	MAPPER_AddHandler(profile_analysis, SDL_SCANCODE_F4, PRIMARY_MOD,
@@ -841,19 +945,26 @@ void custom_init(Section *sec)
 	                  "Toggle complex selfmod");
 	MAPPER_AddHandler(toggle_abi_collection_mode, SDL_SCANCODE_7,
 	                  PRIMARY_MOD, "custabi_t", "Toggle ABI collect");
-	MAPPER_AddHandler(print_runtime_modes_hotkey, SDL_SCANCODE_0,
+	MAPPER_AddHandler(print_runtime_modes_hotkey, SDL_SCANCODE_8,
 	                  PRIMARY_MOD, "custstat", "Custom status");
 #if DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH
 	set_runtime_profile(RuntimeProfile::Analysis);
 #else
-	set_runtime_profile(RuntimeProfile::CollectOnly);
+	// Instrument build: collect run-time info by default so a plain program
+	// run produces the .json trace consumed by the analysis tools.
+	set_runtime_profile(RuntimeProfile::Analysis);
 #endif
 	// MAPPER_AddHandler(DumpExe2, SDL_SCANCODE_F3, PRIMARY_MOD, "dumpexe1",
 	//                   "Dumpexe1");
 }
 
 // Custom initialization function for the entry point.
-void custom_init_entrypoint(char *name, uint16_t loadseg)
+void custom_init_entrypoint(char *name,
+                            uint16_t loadseg,
+                            uint16_t init_cs,
+                            uint16_t init_ip,
+                            uint16_t init_ss,
+                            uint16_t init_sp)
 {
 	/**
 	 * Entry Point Initialization
@@ -864,10 +975,11 @@ void custom_init_entrypoint(char *name, uint16_t loadseg)
 	 * 3. Start instruction tracing
 	 */
 	X86_REGREF
-	custom_log("entrypoint hook: name=%s loadseg=%04x cs:ip=%04x:%04x ss:sp=%04x:%04x dispatch=%d",
-	           name ? name : "", loadseg, cs, ip, ss, sp,
+	custom_log("entrypoint hook: name=%s loadseg=%04x init cs:ip=%04x:%04x init ss:sp=%04x:%04x dispatch=%d",
+	           name ? name : "",
+	           loadseg, init_cs, init_ip, init_ss, init_sp,
 	           DOSBOX_CUSTOM_ENABLE_GAME_DISPATCH ? 1 : 0);
-	m2c::dumpexe_start_hook(loadseg, cs, ip, ss, sp); // Start execution hook
+	m2c::dumpexe_start_hook(name, loadseg, init_cs, init_ip, init_ss, init_sp);
 	m2c::runtime_loadseg = loadseg;
 
 	// Check if it's a target binary and if initialization is complete.
@@ -1990,17 +2102,22 @@ void ShadowMemory::collect_selfmod(dw seg,
 }
 
 	// Function to collect information about cross-segment jumps.
-	void ShadowMemory::collect_cross_jumps(dw newcs, dd newip, FlowKind kind)
+	void ShadowMemory::collect_cross_jumps(dw newcs, dd newip, FlowKind kind,
+	                                       dd src_csip)
 	{
 		// Reference the CPU registers.
 		X86_REGREF
 
+		// src_csip is the linear address of the branching instruction, when
+		// the instrumented core captured it at decode start.  Fall back to
+		// the current cs:eip for callers that did not capture it.
+		const dd src = src_csip ? src_csip : ((cs << 4) + eip);
+
 		// Collect jump targets within a specific code segment range.
 		if (newcs >= 0x192 && newcs < 0xa000) {
-			const dd src = (cs << 4) + eip;
 			const dd dst = (newcs << 4) + newip;
 			m_jumps.insert(dst);
-			if (cs >= 0x192 && cs < 0xa000) {
+			if (src >= (0x192 << 4) && src < (0xa000 << 4)) {
 				if (m_code.find(src) == m_code.end()) {
 					m_code[src] = std::make_shared<Code>();
 				}
@@ -2011,7 +2128,7 @@ void ShadowMemory::collect_selfmod(dw seg,
 		}
 		PtrCandidate &candidate = ptr_candidate_cache[newip & (k_ptr_candidate_cache_size - 1)];
 		if (candidate.valid && candidate.value == static_cast<dw>(newip)) {
-			const dd use = (cs >= 0x192 && cs < 0xa000) ? ((cs << 4) + eip) : 0;
+			const dd use = (src >= (0x192 << 4) && src < (0xa000 << 4)) ? src : 0;
 			record_pointer_use(candidate.source_addr,
 			                   (static_cast<dd>(newcs) << 4) + newip,
 			                   candidate.producer_csip, use, candidate.value,
@@ -2177,12 +2294,16 @@ void ShadowMemory::dump()
 	std::string s = j.dump();
 
 	// Write the JSON data to a file.
-	std::string json_file_name = exename + ".json";
-	printf("Dumping run-time info into %s\n", json_file_name.c_str());
+	std::string json_file_name = output_path_for(exename + ".json");
+	custom_log("Dumping run-time info into %s", json_file_name.c_str());
 	FILE *f = fopen(json_file_name.c_str(), "w");
+	if (!f) {
+		custom_log("Failed to open run-time info file %s", json_file_name.c_str());
+		return;
+	}
 	fwrite(s.c_str(), s.size(), 1, f);
 	fclose(f);
-	printf("Saved json\n");
+	custom_log("Saved json");
 
 		m_data.clear();
 		m_code.clear();

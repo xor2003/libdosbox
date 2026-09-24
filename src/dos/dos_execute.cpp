@@ -21,10 +21,12 @@
 
 #include <cctype>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstdio>
 #include <chrono>
 #include <cstring>
 #include <ctime>
+#include <algorithm>
 #include <string>
 
 #include "callback.h"
@@ -43,11 +45,41 @@
 
 #include "../hardware/vmware.h"
 
+#if DOSBOX_CUSTOM
 namespace m2c {
 extern std::string exename;
 }
+#endif
 
 namespace {
+bool exec_trace_enabled()
+{
+	static const bool enabled = []() {
+		const auto *value = std::getenv("DOSBOX_TRACE_EXEC");
+		return value && *value && std::strcmp(value, "0") != 0;
+	}();
+	return enabled;
+}
+
+std::string describe_cmdtail(const RealPt cmdtail)
+{
+	if (!cmdtail)
+		return {};
+
+	const auto seg = RealSegment(cmdtail);
+	const auto off = RealOffset(cmdtail);
+	const auto len = real_readb(seg, off);
+	const auto copy_len = std::min<uint8_t>(len, 126);
+
+	std::string text;
+	text.reserve(copy_len);
+	for (uint8_t i = 0; i < copy_len; ++i) {
+		const auto ch = static_cast<char>(real_readb(seg, off + 1 + i));
+		text.push_back(std::isprint(static_cast<unsigned char>(ch)) ? ch : '.');
+	}
+	return text;
+}
+
 void custom_exec_log(const char *format, ...)
 {
 	using namespace std::chrono;
@@ -62,6 +94,34 @@ void custom_exec_log(const char *format, ...)
 	std::strftime(timestamp, sizeof(timestamp), "%F %T", &tm_buf);
 
 	std::fprintf(stderr, "%s.%03lld | EXEC: ",
+	             timestamp, static_cast<long long>(ms.count()));
+
+	va_list args;
+	va_start(args, format);
+	std::vfprintf(stderr, format, args);
+	va_end(args);
+
+	std::fputc('\n', stderr);
+	std::fflush(stderr);
+}
+
+void custom_exec_trace(const char *format, ...)
+{
+	if (!exec_trace_enabled())
+		return;
+
+	using namespace std::chrono;
+	const auto now = system_clock::now();
+	const auto time = system_clock::to_time_t(now);
+	const auto ms = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
+
+	std::tm tm_buf = {};
+	localtime_r(&time, &tm_buf);
+
+	char timestamp[32] = {};
+	std::strftime(timestamp, sizeof(timestamp), "%F %T", &tm_buf);
+
+	std::fprintf(stderr, "%s.%03lld | EXEC-TRACE: ",
 	             timestamp, static_cast<long long>(ms.count()));
 
 	va_list args;
@@ -167,6 +227,13 @@ void DOS_ClearLaunchedProgramNames()
 void DOS_Terminate(const uint16_t psp_seg, const bool is_terminate_and_stay_resident,
                    const uint8_t exit_code)
 {
+	custom_exec_log("TERMINATE psp=%04x tsr=%d exitcode=%u",
+	                psp_seg, is_terminate_and_stay_resident ? 1 : 0,
+	                static_cast<unsigned>(exit_code));
+	custom_exec_trace("terminate begin psp=%04x parent=%04x dos_psp=%04x",
+	                  psp_seg, DOS_PSP(psp_seg).GetParent(), dos.psp());
+	custom_exit_prog(exit_code, psp_seg);
+
 	erase_canonical_name(psp_seg);
 
 	dos.return_code = exit_code;
@@ -324,6 +391,9 @@ static void SetupCMDLine(uint16_t pspseg,DOS_ParamBlock & block) {
 }
 
 bool DOS_Execute(char * name,PhysPt block_pt,uint8_t flags) {
+	custom_exec_trace("execute request source=%s flags=%u dos_psp=%04x cs:ip=%04x:%04x ss:sp=%04x:%04x",
+	                  name ? name : "", static_cast<unsigned>(flags), dos.psp(),
+	                  SegValue(cs), reg_ip, SegValue(ss), reg_sp);
 	EXE_Header head;Bitu i;
 	uint16_t fhandle;uint16_t len;uint32_t pos;
 	uint16_t pspseg,envseg,loadseg,memsize,readsize;
@@ -331,8 +401,14 @@ bool DOS_Execute(char * name,PhysPt block_pt,uint8_t flags) {
 	Bitu headersize=0,imagesize=0;
 	char stripname[8] = {0};
 	DOS_ParamBlock block(block_pt);
+	const char *source_name = name;
 
 	block.LoadData();
+	const auto cmdtail_text = describe_cmdtail(block.exec.cmdtail);
+	custom_exec_trace("execute params source=%s cmdtail=%04x:%04x text='%s' envseg=%04x",
+	                  name ? name : "", RealSegment(block.exec.cmdtail),
+	                  RealOffset(block.exec.cmdtail), cmdtail_text.c_str(),
+	                  block.exec.envseg);
 	//Remove the loadhigh flag for the moment!
 	if(flags&0x80) LOG(LOG_EXEC,LOG_ERROR)("using loadhigh flag!!!!!. dropping it");
 	flags &= 0x7f;
@@ -559,6 +635,9 @@ bool DOS_Execute(char * name,PhysPt block_pt,uint8_t flags) {
 		DOS_MCB pspmcb(dos.psp()-1);
 		pspmcb.SetFileName(stripname);
 		DOS_UpdateCurrentProgramName();
+		custom_exec_trace("prepared psp=%04x parent=%04x file=%s source=%s memsize=%04x loadseg=%04x",
+		                  pspseg, newpsp.GetParent(), stripname,
+		                  source_name ? source_name : "", memsize, loadseg);
 	}
 
 	if (flags==LOAD) {
@@ -573,19 +652,28 @@ bool DOS_Execute(char * name,PhysPt block_pt,uint8_t flags) {
 		reg_ax=RealOffset(csip);
 		reg_bx=memsize;
 		reg_dx=0;
+		custom_exec_trace("load-only prepared psp=%04x initcsip=%04x:%04x initsssp=%04x:%04x",
+		                  pspseg, RealSegment(csip), RealOffset(csip),
+		                  RealSegment(sssp-2), RealOffset(sssp-2));
 		return true;
 	}
 
 		if (flags==LOADNGO) {
+#if DOSBOX_CUSTOM
 			m2c::exename = stripname;
-			SegSet16(cs, RealSegment(csip));
-			SegSet16(ss, RealSegment(sssp));
-			reg_ip = RealOffset(csip);
-			reg_sp = RealOffset(sssp);
-			custom_exec_log("LOADNGO name=%s loadseg=%04x cs:ip=%04x:%04x ss:sp=%04x:%04x memsize=%04x",
-			                stripname, loadseg, RealSegment(csip), RealOffset(csip),
-			                RealSegment(sssp), RealOffset(sssp), memsize);
-			custom_init_entrypoint(stripname, loadseg);
+			custom_init_prog(stripname, loadseg,
+			                 RealSegment(csip), RealOffset(csip));
+#endif
+			CPU_TraceInstructionsOnExec(source_name ? source_name : stripname);
+			custom_exec_log("LOADNGO name=%s source=%s loadseg=%04x cs:ip=%04x:%04x ss:sp=%04x:%04x memsize=%04x psp=%04x format=%s",
+			                stripname, source_name ? source_name : "", loadseg,
+			                RealSegment(csip), RealOffset(csip),
+			                RealSegment(sssp), RealOffset(sssp), memsize,
+			                pspseg, iscom ? "COM" : "EXE");
+			custom_exec_trace("loadngo pre-iret psp=%04x ax=%04x bx=%04x dx=%04x entry=%04x:%04x stack=%04x:%04x",
+			                  pspseg, reg_ax, reg_bx, reg_dx,
+			                  RealSegment(csip), RealOffset(csip),
+			                  RealSegment(sssp), RealOffset(sssp));
 
 		if ((reg_sp>0xfffe) || (reg_sp<18)) LOG(LOG_EXEC,LOG_ERROR)("stack underflow/wrap at EXEC");
 		/* Set the stack for new program */
@@ -607,6 +695,16 @@ bool DOS_Execute(char * name,PhysPt block_pt,uint8_t flags) {
 		reg_di=RealOffset(sssp);
 		reg_bp=0x91c;	/* DOS internal stack begin relict */
 		SegSet16(ds,pspseg);SegSet16(es,pspseg);
+			custom_exec_trace("loadngo ready psp=%04x ax=%04x bx=%04x cx=%04x dx=%04x ds=%04x es=%04x cs:ip=%04x:%04x ss:sp=%04x:%04x",
+			                  pspseg, reg_ax, reg_bx, reg_cx, reg_dx,
+			                  SegValue(ds), SegValue(es),
+			                  SegValue(cs), reg_ip, SegValue(ss), reg_sp);
+			custom_init_entrypoint(stripname,
+			                      loadseg,
+			                      RealSegment(csip),
+			                      RealOffset(csip),
+			                      RealSegment(sssp),
+			                      RealOffset(sssp));
 #if C_DEBUG
 		/* Started from debug.com, then set breakpoint at start */
 		DEBUG_CheckExecuteBreakpoint(RealSegment(csip),RealOffset(csip));

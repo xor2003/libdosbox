@@ -49,6 +49,7 @@
 #endif
 
 #include "../capture/capture.h"
+#include "../include/custom.h"
 #include "../dos/dos_locale.h"
 #include "../ints/int10.h"
 #include "control.h"
@@ -4797,6 +4798,9 @@ int sdl_main(int argc, char* argv[])
 	// Ensure we perform SDL cleanup and restore console settings
 	atexit(QuitSDL);
 
+	for (int i = 1; i < argc; ++i)
+		custom_note_host_program_path(argv[i]);
+
 	CommandLine command_line(argc, argv);
 	control = std::make_unique<Config>(&command_line);
 
@@ -5178,4 +5182,3 @@ int sdl_main(int argc, char* argv[])
 
 	return return_code;
 }
-

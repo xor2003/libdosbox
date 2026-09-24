@@ -103,6 +103,7 @@ Bits CPU_Core_Dynrec_Run() noexcept;
 Bits CPU_Core_Dynrec_Trap_Run() noexcept;
 Bits CPU_Core_Prefetch_Run() noexcept;
 Bits CPU_Core_Prefetch_Trap_Run() noexcept;
+void CPU_TraceInstructionsOnExec(const char *name);
 
 void CPU_ResetAutoAdjust();
 

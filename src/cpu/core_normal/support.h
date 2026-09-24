@@ -17,6 +17,22 @@
  */
 
 
+#if DOSBOX_CUSTOM
+#include "custom.h"
+/* Record a control-flow edge for the run-time info collector.  The
+ * source address is m2c::rt_insn_linear, captured by the core at
+ * instruction start (reg_ip may already hold the transfer target here). */
+#define RT_COLLECT_JUMP(ncs, nip, knd)                                  \
+	do {                                                            \
+		if (collect_rt_info)                                    \
+			m2c::shadow_memory.collect_cross_jumps(           \
+				(ncs), (nip), (knd),                    \
+				m2c::rt_insn_linear);                   \
+	} while (0)
+#else
+#define RT_COLLECT_JUMP(ncs, nip, knd) do { (void)0; } while (0)
+#endif
+
 #define LoadMbs(off) (int8_t)(LoadMb(off))
 #define LoadMws(off) (int16_t)(LoadMw(off))
 #define LoadMds(off) (int32_t)(LoadMd(off))
@@ -59,6 +75,8 @@ static inline int32_t Fetchds()
 	SAVEIP;											\
 	if (COND) reg_ip+=Fetchbs();					\
 	reg_ip+=1;										\
+	if (COND) RT_COLLECT_JUMP(Segs.val[cs], reg_ip,	\
+				m2c::FlowKind::Jcc);	\
 	continue;										\
 }
 
@@ -66,6 +84,8 @@ static inline int32_t Fetchds()
 	SAVEIP;											\
 	if (COND) reg_ip+=Fetchws();					\
 	reg_ip+=2;										\
+	if (COND) RT_COLLECT_JUMP(Segs.val[cs], reg_ip,	\
+				m2c::FlowKind::Jcc);	\
 	continue;										\
 }
 
@@ -73,6 +93,8 @@ static inline int32_t Fetchds()
 	SAVEIP;											\
 	if (COND) reg_eip+=Fetchbs();					\
 	reg_eip+=1;										\
+	if (COND) RT_COLLECT_JUMP(Segs.val[cs], reg_eip,	\
+				m2c::FlowKind::Jcc);	\
 	continue;										\
 }
 
@@ -80,6 +102,8 @@ static inline int32_t Fetchds()
 	SAVEIP;											\
 	if (COND) reg_eip+=Fetchds();					\
 	reg_eip+=4;										\
+	if (COND) RT_COLLECT_JUMP(Segs.val[cs], reg_eip,	\
+				m2c::FlowKind::Jcc);	\
 	continue;										\
 }
 

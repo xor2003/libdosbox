@@ -19,7 +19,12 @@
 #include "dosbox.h"
 
 // Needed for std::isnan in simde
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
 
 #include "callback.h"
 #include "cpu.h"
@@ -36,6 +41,11 @@
 
 #if C_DEBUG
 #include "debug.h"
+#endif
+
+#if DOSBOX_CUSTOM
+#include "custom.h"
+#include "paging.h"
 #endif
 
 #if (!C_CORE_INLINE)
@@ -58,6 +68,10 @@
 #define SaveMd(off,val)	mem_writed_inline(off,val)
 #define SaveMq(off,val) mem_writeq_inline(off,val)
 #endif
+
+/* Run-time memory access collection is already hooked inside the
+ * mem_read*_inline/mem_write*_inline helpers (see paging.h), so the
+ * LoadM and SaveM macros need no extra wrapping here. */
 
 extern Bitu cycle_count;
 
@@ -111,6 +125,86 @@ static struct {
 	GetEAHandler * ea_table;
 } core;
 
+namespace {
+struct InstructionTraceState {
+	bool configured = false;
+	bool active = false;
+	bool reached_limit = false;
+	std::string target_exec = {};
+	std::string output_path = {};
+	FILE *file = nullptr;
+	uint64_t limit = 0;
+	uint64_t count = 0;
+};
+
+InstructionTraceState instruction_trace = {};
+
+std::string uppercase_copy(const char *value)
+{
+	if (!value)
+		return {};
+	std::string result(value);
+	std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) {
+		return static_cast<char>(std::toupper(c));
+	});
+	return result;
+}
+
+void configure_instruction_trace()
+{
+	if (instruction_trace.configured)
+		return;
+
+	instruction_trace.configured = true;
+
+	const auto *target = std::getenv("DOSBOX_TRACE_INSN_EXEC");
+	if (!target || !*target)
+		return;
+
+	instruction_trace.target_exec = uppercase_copy(target);
+
+	const auto *output = std::getenv("DOSBOX_TRACE_INSN_FILE");
+	if (output && *output)
+		instruction_trace.output_path = output;
+
+	if (const auto *limit = std::getenv("DOSBOX_TRACE_INSN_LIMIT"); limit && *limit) {
+		instruction_trace.limit = std::strtoull(limit, nullptr, 10);
+	}
+}
+
+void log_current_instruction()
+{
+	if (!instruction_trace.active || instruction_trace.reached_limit)
+		return;
+
+	if (instruction_trace.limit && instruction_trace.count >= instruction_trace.limit) {
+		instruction_trace.reached_limit = true;
+		if (instruction_trace.file)
+			std::fflush(instruction_trace.file);
+		return;
+	}
+
+	auto *out = instruction_trace.file ? instruction_trace.file : stderr;
+	const auto ip = static_cast<uint32_t>(reg_eip);
+	const auto linear = core.cseip;
+	uint8_t bytes[6] = {};
+	for (size_t i = 0; i < 6; ++i)
+		bytes[i] = LoadMb(linear + i);
+
+	std::fprintf(out,
+	             "%llu %04x:%04x %02x %02x %02x %02x %02x %02x AX=%04x BX=%04x CX=%04x DX=%04x SI=%04x DI=%04x BP=%04x SP=%04x DS=%04x ES=%04x SS=%04x FL=%04x\n",
+	             static_cast<unsigned long long>(instruction_trace.count),
+	             SegValue(cs), static_cast<unsigned>(ip & 0xffff),
+	             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5],
+	             reg_ax, reg_bx, reg_cx, reg_dx, reg_si, reg_di, reg_bp, reg_sp,
+	             SegValue(ds), SegValue(es), SegValue(ss), reg_flags);
+
+	++instruction_trace.count;
+	if ((instruction_trace.count % 1024u) == 0)
+		std::fflush(out);
+}
+} // namespace
+
 #define GETIP		(core.cseip-SegBase(cs))
 #define SAVEIP		reg_eip=GETIP;
 #define LOADIP		core.cseip=(SegBase(cs)+reg_eip);
@@ -153,6 +247,13 @@ Bits CPU_Core_Normal_Run() noexcept
 	ZoneScoped;
 	while (CPU_Cycles-->0) {
 		LOADIP;
+#if DOSBOX_CUSTOM
+		if (collect_rt_info) {
+			m2c::rt_insn_linear =
+				(Segs.val[cs] << 4) + reg_eip;
+			m2c::shadow_memory.collect_segs();
+		}
+#endif
 		core.opcode_index=cpu.code.big*0x200;
 		core.prefixes=cpu.code.big;
 		core.ea_table=&EATable[cpu.code.big*256];
@@ -169,6 +270,7 @@ Bits CPU_Core_Normal_Run() noexcept
 		cycle_count++;
 #endif
 restart_opcode:
+		log_current_instruction();
 		switch (core.opcode_index+Fetchb()) {
 		#include "core_normal/prefix_none.h"
 		#include "core_normal/prefix_0f.h"
@@ -220,3 +322,26 @@ void CPU_Core_Normal_Init(void) {
 
 }
 
+void CPU_TraceInstructionsOnExec(const char *name)
+{
+	configure_instruction_trace();
+
+	if (instruction_trace.target_exec.empty() || !name || !*name)
+		return;
+
+	const auto exec_name = uppercase_copy(name);
+	if (exec_name != instruction_trace.target_exec)
+		return;
+
+	if (!instruction_trace.file && !instruction_trace.output_path.empty()) {
+		instruction_trace.file = std::fopen(instruction_trace.output_path.c_str(), "w");
+	}
+
+	instruction_trace.active = true;
+	instruction_trace.reached_limit = false;
+	instruction_trace.count = 0;
+
+	auto *out = instruction_trace.file ? instruction_trace.file : stderr;
+	std::fprintf(out, "# trace start %s\n", name);
+	std::fflush(out);
+}

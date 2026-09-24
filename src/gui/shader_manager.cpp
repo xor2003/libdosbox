@@ -350,8 +350,13 @@ ShaderSettings ShaderManager::ParseShaderSettings(const std::string& shader_name
 		const std::sregex_iterator end;
 
 		while (next != end) {
-			std::smatch match = *next;
-			auto pragma       = match[1].str();
+			const auto match = *next;
+			if (match.size() < 2 || !match[1].matched) {
+				++next;
+				continue;
+			}
+
+			const auto pragma = match[1].str();
 
 			if (pragma == "use_npot_texture") {
 				settings.use_npot_texture = true;

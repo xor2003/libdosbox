@@ -566,9 +566,10 @@
 		if (reg_ax & 0x8000) reg_dx=0xffff;else reg_dx=0;
 		break;
 	CASE_W(0x9a)												/* CALL Ap */
-		{ 
+		{
 			FillFlags();
 			uint16_t newip=Fetchw();uint16_t newcs=Fetchw();
+			RT_COLLECT_JUMP(newcs, newip, m2c::FlowKind::Call);
 			CPU_CALL(false,newcs,newip,GETIP);
 #if CPU_TRAP_CHECK
 			if (GETFLAG(TF)) {	
@@ -905,25 +906,28 @@
 			break;
 		}
 	CASE_W(0xe8)												/* CALL Jw */
-		{ 
+		{
 			uint16_t addip=Fetchws();
 			SAVEIP;
 			Push_16(reg_eip);
 			reg_eip=(uint16_t)(reg_eip+addip);
+			RT_COLLECT_JUMP(Segs.val[cs], reg_eip, m2c::FlowKind::Call);
 			continue;
 		}
 	CASE_W(0xe9)												/* JMP Jw */
-		{ 
+		{
 			uint16_t addip=Fetchws();
 			SAVEIP;
 			reg_eip=(uint16_t)(reg_eip+addip);
+			RT_COLLECT_JUMP(Segs.val[cs], reg_eip, m2c::FlowKind::Jump);
 			continue;
 		}
 	CASE_W(0xea)												/* JMP Ap */
-		{ 
+		{
 			uint16_t newip=Fetchw();
 			uint16_t newcs=Fetchw();
 			FillFlags();
+			RT_COLLECT_JUMP(newcs, newip, m2c::FlowKind::Jump);
 			CPU_JMP(false,newcs,newip,GETIP);
 #if CPU_TRAP_CHECK
 			if (GETFLAG(TF)) {	
@@ -934,10 +938,11 @@
 			continue;
 		}
 	CASE_W(0xeb)												/* JMP Jb */
-		{ 
+		{
 			int16_t addip=Fetchbs();
 			SAVEIP;
 			reg_eip=(uint16_t)(reg_eip+addip);
+			RT_COLLECT_JUMP(Segs.val[cs], reg_eip, m2c::FlowKind::Jump);
 			continue;
 		}
 	CASE_B(0xec)												/* IN AL,DX */
@@ -1128,6 +1133,8 @@
 			case 0x02:										/* CALL Ev */
 				if (rm >= 0xc0 ) {GetEArw;reg_eip=*earw;}
 				else {GetEAa;reg_eip=LoadMw(eaa);}
+				RT_COLLECT_JUMP(Segs.val[cs], reg_eip,
+						m2c::FlowKind::Call);
 				Push_16(GETIP);
 				continue;
 			case 0x03:										/* CALL Ep */
@@ -1137,6 +1144,8 @@
 					uint16_t newip=LoadMw(eaa);
 					uint16_t newcs=LoadMw(eaa+2);
 					FillFlags();
+					RT_COLLECT_JUMP(newcs, newip,
+							m2c::FlowKind::Call);
 					CPU_CALL(false,newcs,newip,GETIP);
 #if CPU_TRAP_CHECK
 					if (GETFLAG(TF)) {	
@@ -1147,17 +1156,21 @@
 					continue;
 				}
 				break;
-			case 0x04:										/* JMP Ev */	
+			case 0x04:										/* JMP Ev */
 				if (rm >= 0xc0 ) {GetEArw;reg_eip=*earw;}
 				else {GetEAa;reg_eip=LoadMw(eaa);}
+				RT_COLLECT_JUMP(Segs.val[cs], reg_eip,
+						m2c::FlowKind::Jump);
 				continue;
-			case 0x05:										/* JMP Ep */	
+			case 0x05:										/* JMP Ep */
 				{
 					if (rm >= 0xc0) goto illegal_opcode;
 					GetEAa;
 					uint16_t newip=LoadMw(eaa);
 					uint16_t newcs=LoadMw(eaa+2);
 					FillFlags();
+					RT_COLLECT_JUMP(newcs, newip,
+							m2c::FlowKind::Jump);
 					CPU_JMP(false,newcs,newip,GETIP);
 #if CPU_TRAP_CHECK
 					if (GETFLAG(TF)) {	

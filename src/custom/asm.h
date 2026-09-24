@@ -129,6 +129,18 @@ struct _STATE;
 extern bool __dispatch_call(m2c::_offsets __i, struct m2c::_STATE *_state);
 
 namespace m2c {
+#if DOSBOX_CUSTOM
+db* linked_code_segment_raddr(dw, dw);
+db* linked_data_segment_raddr(dw, dw);
+void set_segment_register(dw &, dw);
+void copy_linked_program_segment_prefix(dw, const void *, size_t);
+#else
+inline db* linked_code_segment_raddr(dw, dw) { return nullptr; }
+inline db* linked_data_segment_raddr(dw, dw) { return nullptr; }
+inline void set_segment_register(dw &, dw) {}
+inline void copy_linked_program_segment_prefix(dw, const void *, size_t) {}
+#endif
+
 extern db vgaPalette[256 * 3];
 
 extern struct Memory m;

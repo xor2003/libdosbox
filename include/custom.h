@@ -15,11 +15,13 @@
 typedef uint16_t dw;
 typedef uint32_t dd;
 
+#if DOSBOX_CUSTOM
 extern bool collect_rt_info;
 extern bool collect_rt_info_vars;
 extern bool compare_mode;
 extern uint32_t last_ip;
 extern int custom_runs;
+#endif
 
 // Keep JSON include portable across nlohmann installations.
 #if __has_include(<json.hpp>)
@@ -39,6 +41,7 @@ enum class FlowKind : uint8_t {
 	Other = 4,
 };
 
+#if DOSBOX_CUSTOM
 enum RuntimeValueClass : uint32_t {
 	RtValueUnknown    = 0,
 	RtValueDataOffset = 1u << 0,
@@ -47,8 +50,9 @@ enum RuntimeValueClass : uint32_t {
 	RtValueSegment    = 1u << 3,
 	RtValueFarPointer = 1u << 4,
 };
-
-extern std::string exename;
+#endif
+inline std::string exename;
+inline std::string output_dir;
 
 extern void Jend();
 
@@ -218,7 +222,8 @@ struct _STATE;
 	   void collect_segs();
 	   void collect_data(dd b, size_t s, bool is_write = false, uint64_t value = 0, bool has_value = false);
 	   void collect_selfmod(dw seg, dd ip, size_t modsize, size_t size, const char * oldins, const char * newins);
-	   void collect_cross_jumps(dw target_cs, dd target_ip, FlowKind kind = FlowKind::Other);
+	   void collect_cross_jumps(dw target_cs, dd target_ip, FlowKind kind = FlowKind::Other,
+	                            dd src_csip = 0);
 	   void dump();
    friend void to_json(nlohmann::json& nlohmann_json_j, const ShadowMemory& nlohmann_json_t);
    
@@ -226,13 +231,27 @@ struct _STATE;
  };
 
 	  extern ShadowMemory shadow_memory;
+#if DOSBOX_CUSTOM
+// Linear address of the instruction currently being decoded/executed.
+// Set by instrumented CPU cores at instruction start so control-flow
+// hooks can attribute edges to the real source even after reg_ip has
+// been overwritten with the transfer target.
+extern dd rt_insn_linear;
+#endif
+#if DOSBOX_CUSTOM
 void rt_collect_memory_read(dd address, uint8_t size, uint64_t value);
 void rt_collect_memory_write(dd address, uint8_t size, uint64_t value);
 extern bool abi_collection_mode;
+#else
+inline void rt_collect_memory_read(dd, uint8_t, uint64_t) {}
+inline void rt_collect_memory_write(dd, uint8_t, uint64_t) {}
+inline bool abi_collection_mode = false;
+#endif
 // -------------------------
 
 }
 
+#if DOSBOX_CUSTOM
 extern bool trace_instructions;
 extern volatile bool defered_custom_call; // int was called by interpreter which m2c have to execute later
 extern bool from_callf; // check if m2c's interrupt called from interpreter or callf from m2c to interperter's bios
@@ -241,6 +260,16 @@ extern volatile bool doing_single_step;
 extern volatile bool compare_jump;
 extern Bitu old_cycles; // backup remaining cycles
 extern std::stack<uint32_t> return_point; // where interpreter should return cntrol to m2c
+#else
+static inline bool trace_instructions = false;
+static inline bool defered_custom_call = false; // int was called by interpreter which m2c have to execute later
+static inline bool from_callf = false; // check if m2c's interrupt called from interpreter or callf from m2c to interperter's bios
+static inline bool from_interpreter = false;
+static inline bool doing_single_step = false;
+static inline bool compare_jump = false;
+static inline Bitu old_cycles = 0; // backup remaining cycles
+static inline std::stack<uint32_t> return_point = {}; // where interpreter should return cntrol to m2c
+#endif
 extern void print_instruction(uint16_t newcs, uint32_t newip);
 void init_get_fname(char *executable_name_out, char *source_path);
 
@@ -250,11 +279,19 @@ extern uint16_t custom_oldCS, custom_oldIP;
 
 
 void custom_init(Section *sec);
+void custom_note_host_program_path(const char *path);
 
 /* prototypes for Execution operations */
 void custom_init_prog(char *, uint16_t, uint16_t, uint16_t);
-void custom_exit_prog(uint8_t);
-void custom_init_entrypoint(char *, uint16_t);
+void custom_exit_prog(uint8_t, uint16_t psp_seg);
+void custom_exit_section();
+void custom_init_entrypoint(char *,
+                            uint16_t,
+                            uint16_t,
+                            uint16_t,
+                            uint16_t,
+                            uint16_t);
+void custom_note_exec_request(char *, uint8_t, uint16_t, uint16_t, uint16_t);
 
 /* prototypes for CPU operations */
 int custom_callf(Bitu, Bitu);
@@ -262,13 +299,18 @@ int custom_callf(Bitu, Bitu);
 #else /* DOSBOX_CUSTOM */
 
 static inline void custom_init(Section *sec) { }
+static inline void custom_note_host_program_path(const char *) { }
 
 /* prototypes for Execution operations */
 static inline void
 custom_init_prog(char *name, uint16_t relocate, uint16_t init_cs, uint16_t init_ip) { }
-static inline void custom_init_entrypoint(char *, uint16_t) { }
+static inline void
+custom_init_entrypoint(char *, uint16_t, uint16_t, uint16_t, uint16_t, uint16_t) { }
+static inline void
+custom_note_exec_request(char *, uint8_t, uint16_t, uint16_t, uint16_t) { }
 
-static inline void custom_exit_prog(uint8_t exitcode) { }
+static inline void custom_exit_prog(uint8_t exitcode, uint16_t psp_seg) { }
+static inline void custom_exit_section() { }
 
 /* prototypes for CPU operations */
 static inline int custom_callf(Bitu seg, Bitu off) { return 0; }

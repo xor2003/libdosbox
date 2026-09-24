@@ -25,8 +25,8 @@ void ShadowStack::push(_STATE *_state, dd value)
 		// if (m_current == m_ss.size ())
 		//   m_ss.resize (m_current + 1);
 		print_frame(f);
-		m_current = esp;
-		m_ss[esp] = f;
+		m_current = sp;
+		m_ss[sp] = f;
 		m2c::log_debug("m_itiscall=%d m_deep=%d\n", m_itiscall, m_deep);
 		//     m2c::log_info("ssize=%d\n",m_ss.size());
 	}
@@ -37,7 +37,7 @@ void ShadowStack::push(_STATE *_state, dd value)
 bool ShadowStack::itwascall()
 {
 	X86_REGREF
-	return m_ss[esp].itwascall;
+	return m_ss[sp].itwascall;
 }
 
 void ShadowStack::pop(_STATE *_state, size_t word_size)
@@ -60,13 +60,13 @@ void ShadowStack::pop(_STATE *_state, size_t word_size)
 		   big\n"); return;
 		          }
 		*/
-		log_debug("m_needtoskipcall %d m_current %x esp %x\n",
-		          m_needtoskipcall, m_current, esp);
+		log_debug("m_needtoskipcall %d m_current %x sp %x\n",
+		          m_needtoskipcall, m_current, sp);
 		//    m2c::log_info("ssize=%d\n",m_ss.size() );
-		if (m_current > esp) {
-			m_current = esp;
-			//                  log_debug ("~m_current %x esp %x\n",
-			//                  m_current, esp);
+		if (m_current > sp) {
+			m_current = sp;
+			//                  log_debug ("~m_current %x sp %x\n",
+			//                  m_current, sp);
 		}
 
 		//          if (m_current)
@@ -101,7 +101,7 @@ void ShadowStack::pop(_STATE *_state, size_t word_size)
 				//                  m_current);
 			}
 
-			while (m_current <= esp);
+			while (m_current <= sp);
 			// log_debug("m_itisret %d m_current %x
 			// m_ss.at(m_current-2).itwascall %d\n",m_itisret,
 			// m_current, m_ss.at(m_current-2).itwascall);

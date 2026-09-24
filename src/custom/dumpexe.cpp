@@ -122,6 +122,50 @@ std::string output_path_for(const std::string &file_name)
 		return file_name;
 	return output_dir + "/" + file_name;
 }
+
+struct ExecStartInfo {
+	bool valid = false;
+	std::string name = {};
+	dw psp = 0;
+	dw loadseg = 0;
+	dw cs = 0;
+	dw ip = 0;
+	dw ss = 0;
+	dw sp = 0;
+};
+
+struct ExecRequestInfo {
+	std::string name = {};
+	uint8_t mode = 0;
+	uint16_t caller_cs = 0;
+	uint16_t caller_ip = 0;
+	uint16_t parent_psp = 0;
+};
+
+ExecStartInfo first_exec_info = {};
+ExecStartInfo last_exec_info = {};
+std::vector<ExecRequestInfo> exec_requests = {};
+
+std::string json_escape(const std::string &in)
+{
+	std::string out;
+	out.reserve(in.size() + 8);
+	for (const unsigned char ch : in) {
+		switch (ch) {
+		case '\\': out += "\\\\"; break;
+		case '"': out += "\\\""; break;
+		case '\n': out += "\\n"; break;
+		case '\r': out += "\\r"; break;
+		case '\t': out += "\\t"; break;
+		default:
+			if (ch >= 0x20) {
+				out.push_back(static_cast<char>(ch));
+			}
+			break;
+		}
+	}
+	return out;
+}
 } // namespace
 
 #ifdef _MSC_VER
@@ -133,6 +177,7 @@ struct ExeInfoRecType {
 	dw ss_;
 	dw sp_;
 	dw psp;
+	dw loadseg;
 	dd size;
 	char name[14];
 } GCC_ATTRIBUTE(packed);
@@ -144,20 +189,47 @@ ExeInfoRecType exeInfo;
 
 dw loadseg_;
 
-void dumpexe_start_hook(dw loadseg,
+void dumpexe_start_hook(const char *name,
+                        dw loadseg,
                         dw load_cs,
                         dw load_ip,
                         dw load_ss,
                         dw load_sp)
 {
+    const std::string exec_name = name ? name : "";
     m2c::exeInfo.cs_ = load_cs;
     m2c::exeInfo.ip_ = load_ip;
     m2c::exeInfo.ss_ = load_ss;
     m2c::exeInfo.sp_ = load_sp;
     m2c::exeInfo.psp = dos.psp();
+    m2c::exeInfo.loadseg = loadseg;
+    last_exec_info = {
+            true,
+            exec_name,
+            dos.psp(),
+            loadseg,
+            load_cs,
+            load_ip,
+            load_ss,
+            load_sp,
+    };
+    if (!first_exec_info.valid) {
+        first_exec_info = last_exec_info;
+    }
     dump_log("start hook: psp=%04x loadseg=%04x cs:ip=%04x:%04x ss:sp=%04x:%04x",
              m2c::exeInfo.psp, loadseg, load_cs, load_ip, load_ss, load_sp);
     loadseg_ = loadseg;
+}
+
+void dumpexe_note_exec_request(const char *name,
+                               uint8_t mode,
+                               uint16_t caller_cs,
+                               uint16_t caller_ip,
+                               uint16_t parent_psp)
+{
+	exec_requests.push_back({name ? name : "", mode, caller_cs, caller_ip, parent_psp});
+	dump_log("exec request: mode=%02x caller=%04x:%04x psp=%04x name=%s",
+	         mode, caller_cs, caller_ip, parent_psp, name ? name : "");
 }
 
 void DumpExe1(bool pressed)
@@ -175,11 +247,8 @@ void DumpExe1(bool pressed)
 		std::memcpy(m2c::exeInfo.name + 1, live_name.c_str(), safe_name_len);
 	exeInfo.name[safe_name_len + 1] = '\0';
 
-	exeInfo.cs_ = SegValue(cs);
-	exeInfo.ip_ = reg_ip;
-	exeInfo.ss_ = SegValue(ss);
-	exeInfo.sp_ = reg_sp;
 	exeInfo.psp = owner_psp;
+	exeInfo.loadseg = loadseg_;
 
 	if (!owner_psp) {
 		dump_log("No active PSP. Refusing dump.");
@@ -187,9 +256,10 @@ void DumpExe1(bool pressed)
 	}
 
 	const uint32_t dump_base_linear = static_cast<uint32_t>(owner_psp) * 0x10u;
-	dump_log("Dump base: psp=%04x linear=%x loadseg=%04x live cs:ip=%04x:%04x ss:sp=%04x:%04x name=%s",
+	dump_log("Dump base: psp=%04x linear=%x loadseg=%04x init cs:ip=%04x:%04x init ss:sp=%04x:%04x live cs:ip=%04x:%04x name=%s",
 	         owner_psp, dump_base_linear, loadseg_, exeInfo.cs_, exeInfo.ip_,
-	         exeInfo.ss_, exeInfo.sp_, live_name.empty() ? "NONAME" : live_name.c_str());
+	         exeInfo.ss_, exeInfo.sp_, SegValue(cs), reg_ip,
+	         live_name.empty() ? "NONAME" : live_name.c_str());
 
 	uint16_t mcb_seg = owner_psp - 1;
 	uint16_t last_end_seg = owner_psp;
@@ -259,6 +329,65 @@ void DumpExe1(bool pressed)
 	OutFile.write(dump_bytes.data(), size);
 	OutFile.close();
 	dump_log("Written %s", dump_file_name.c_str());
+
+	const std::string meta_file_name = dump_file_name + ".meta.json";
+	std::ofstream meta_file(meta_file_name, std::ios::binary | std::ios::out);
+	if (meta_file.is_open()) {
+		meta_file << "{\n";
+		meta_file << "  \"dump_file\": \"" << json_escape(dump_file_name) << "\",\n";
+		meta_file << "  \"dump_name\": \"" << json_escape(live_name) << "\",\n";
+		meta_file << "  \"dump_psp\": " << owner_psp << ",\n";
+		meta_file << "  \"dump_loadseg\": " << loadseg_ << ",\n";
+		meta_file << "  \"dump_runtime_cs\": " << SegValue(cs) << ",\n";
+		meta_file << "  \"dump_runtime_ip\": " << reg_ip << ",\n";
+		meta_file << "  \"dump_runtime_ss\": " << SegValue(ss) << ",\n";
+		meta_file << "  \"dump_runtime_sp\": " << reg_sp << ",\n";
+		meta_file << "  \"first_exec\": ";
+		if (first_exec_info.valid) {
+			meta_file << "{"
+			          << "\"name\":\"" << json_escape(first_exec_info.name) << "\","
+			          << "\"psp\":" << first_exec_info.psp << ","
+			          << "\"loadseg\":" << first_exec_info.loadseg << ","
+			          << "\"cs\":" << first_exec_info.cs << ","
+			          << "\"ip\":" << first_exec_info.ip << ","
+			          << "\"ss\":" << first_exec_info.ss << ","
+			          << "\"sp\":" << first_exec_info.sp << "}";
+		} else {
+			meta_file << "null";
+		}
+		meta_file << ",\n";
+		meta_file << "  \"last_exec\": ";
+		if (last_exec_info.valid) {
+			meta_file << "{"
+			          << "\"name\":\"" << json_escape(last_exec_info.name) << "\","
+			          << "\"psp\":" << last_exec_info.psp << ","
+			          << "\"loadseg\":" << last_exec_info.loadseg << ","
+			          << "\"cs\":" << last_exec_info.cs << ","
+			          << "\"ip\":" << last_exec_info.ip << ","
+			          << "\"ss\":" << last_exec_info.ss << ","
+			          << "\"sp\":" << last_exec_info.sp << "}";
+		} else {
+			meta_file << "null";
+		}
+		meta_file << ",\n";
+		meta_file << "  \"exec_requests\": [\n";
+		for (size_t i = 0; i < exec_requests.size(); ++i) {
+			const auto &req = exec_requests[i];
+			meta_file << "    {"
+			          << "\"name\":\"" << json_escape(req.name) << "\","
+			          << "\"mode\":" << static_cast<unsigned>(req.mode) << ","
+			          << "\"caller_cs\":" << req.caller_cs << ","
+			          << "\"caller_ip\":" << req.caller_ip << ","
+			          << "\"parent_psp\":" << req.parent_psp << "}";
+			if (i + 1 != exec_requests.size())
+				meta_file << ",";
+			meta_file << "\n";
+		}
+		meta_file << "  ]\n";
+		meta_file << "}\n";
+		meta_file.close();
+		dump_log("Written %s", meta_file_name.c_str());
+	}
 }
 
 void DumpMemorySnapshot(bool pressed)
@@ -266,7 +395,7 @@ void DumpMemorySnapshot(bool pressed)
 	if (!pressed)
 		return;
 	DumpExe1(true);
-	dump_log("Ctrl+F2 memory snapshot requested");
+	dump_log("Memory snapshot requested");
 }
 
 } // namespace m2c
