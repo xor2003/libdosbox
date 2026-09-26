@@ -1,231 +1,349 @@
-# ASOUND rebuild notes
+# F-15 ASOUND Driver
 
-This directory contains two ASOUND rebuild paths:
+This directory contains a working replacement for the F-15 Strike Eagle II
+AdLib/OPL overlay driver `ASOUND.EXE`.
 
-- `asound_rebuild.asm`: labeled/disassembled source extracted from the F.EXE listing, with selected fields adjusted toward standalone overlay-on-disk initial state.
-- `asound_refbytes.asm`: generated two-segment MASM source from the standalone `ASOUND.EXE`. This is the byte-exact disk-overlay rebuild oracle.
+Current status:
 
-The sibling `../asound_model/` directory contains a portable host-side C model for decoded stream state, bytecode semantics, and sample ranges. Use this model for modern-platform behavior tests; keep this directory as the byte-identical assembly oracle.
+- The generated `ASOUND.EXE` has been tested in the game and plays through the
+  original game loader.
+- This is the DOS-overlay compatibility implementation. It is intentionally
+  conservative and validated against the original binary.
+- It is not the desired final architecture for a modern compiler or SDL audio
+  backend. Use it as the proven behavior bridge.
 
-## Byte-exact oracle
+## Build
 
-Run:
+The supported driver build uses Microsoft C 5.1 for the C sources and MASM 5
+for the small assembly wrappers required by the ASOUND overlay ABI. The wrapper
+assembly replaces Watcom-only `#pragma aux` behavior such as I/O helpers,
+`cli`/`sti`, and far `retf` entrypoints.
+
+Prerequisites:
+
+- `kvikdos`, or another path-compatible DOS runner invoked through `KVD`.
+- Microsoft C 5.1, with `CL.EXE`, `LINK.EXE`, and `INCLUDE/DOS.H`.
+- Microsoft MASM 5, with `MASM.EXE` and `LINK.EXE`.
+- Host tools: `bash`, `python3`, and `sed`.
+
+Configure tool paths for your machine:
 
 ```bash
-bash src/custom/src_f15/asound_rebuild/build_refbytes.sh
+export KVD=/path/to/kvikdos
+export MSC_ROOT="/path/to/Microsoft C v5.1"
+export MASM5_BIN="/path/to/Microsoft MASM v5/BIN"
 ```
 
-The script:
+If your C compiler tree is not laid out as `bin/` and `INCLUDE/` under
+`MSC_ROOT`, set these directly instead:
 
-1. Reads the standalone reference `ASOUND.EXE`.
-2. Generates `asound_refbytes.asm` with `seg11a3` and `seg127c`.
-3. Preserves all MZ relocation entries with `dw seg ...`.
-4. Builds with MASM 6.11 `ML.EXE` and MASM 5 `LINK.EXE` through `kvikdos`.
-5. Copies the reference MZ checksum word after linking.
+```bash
+export MSC_BIN="/path/to/Microsoft C v5.1/bin"
+export MSC_INCLUDE="/path/to/Microsoft C v5.1/INCLUDE"
+```
 
-Expected result:
+The script has local defaults for this workstation, but portable/repeatable
+builds should set the variables above explicitly.
+
+Build:
+
+```bash
+cd path/to/libdosbox/src/custom/src_f15/asound_rebuild
+./build_msc51_driver.sh
+```
+
+Override the temporary build directory with `ASOUND_MSC51_BUILD_DIR=/path`.
+
+Build outputs are kept outside the source tree. By default:
+
+```text
+/tmp/ASOUND_MSC51/ASOUND.EXE
+/tmp/ASOUND_MSC51/ASOUND.MAP
+/tmp/ASOUND_MSC51/ASWHDR.LST
+/tmp/ASOUND_MSC51/ASWWRAP.LST
+```
+
+The built overlay driver is:
+
+```text
+/tmp/ASOUND_MSC51/ASOUND.EXE
+```
+
+The build script intentionally uses short DOS-side names in the temporary
+directory, compiles with `/AS /G2 /Zl /Gs /Zp1 /DMSC51_BUILD`, assembles the
+MASM overlay wrappers, links with Microsoft LINK, then patches the ASOUND
+overlay header so `image_size`, `code_seg`, and the slot entry offsets match
+the loader contract.
+
+`build_watcom_replacement.sh` remains as the legacy Watcom ABI-validation
+target; it is not the MS C 5.1 driver build.
+
+## Validate
+
+Prerequisites:
+
+- `DOSUNIT=/path/to/dosunit.py`, unless `dosunit.py` is on `PATH`.
+- `ORIGINAL_ASOUND=/path/to/original/ASOUND.EX`. This must be an independent
+  original ASOUND oracle, not the rebuilt file copied into a game directory for
+  testing. In some trees the preserved original is named `ASOUND.EX`, while
+  `ASOUND.EXE` is the replacement copied in for a live game test.
+- Optional KVM smoke: writable `/dev/kvm` and
+  `DOSUNIT_KVIKDOS_C=/path/to/kvikdos.c`.
+
+Run the full focused validation from this directory:
+
+```bash
+cd path/to/libdosbox/src/custom/src_f15/asound_rebuild
+DOSUNIT=/path/to/dosunit.py \
+ORIGINAL_ASOUND=/path/to/original/ASOUND.EX \
+./compare_watcom_replacement_dosunit.sh
+```
+
+Expected important results:
+
+```text
+ssa_abi_gate: passed 11, failed 0, refused 0
+kvm_abi: passed 10/10
+```
+
+Validated game artifact, under `ASOUND_DOSUNIT_OUT`:
+
+```text
+/tmp/asound_watcom_dosunit/try_with_game/ASOUND.EXE
+```
+
+Validation artifacts, under `ASOUND_DOSUNIT_OUT`:
+
+```text
+/tmp/asound_watcom_dosunit/asound_watcom.abi.json
+/tmp/asound_watcom_dosunit/asound_watcom.abi.md
+/tmp/asound_watcom_dosunit/asound_watcom.abi_gate.json
+/tmp/asound_watcom_dosunit/asound_watcom.ssa_abi.results.json
+/tmp/asound_watcom_dosunit/asound_watcom.ssa_abi.report.md
+/tmp/asound_watcom_dosunit/asound_watcom.static_validation_package.json
+/tmp/asound_watcom_dosunit/asound_watcom.abi_compare.json
+```
+
+Notes:
+
+- The source directory should not receive generated `.obj`, `.lst`, `.map`, or
+  `.exe` files. Those belong in `ASOUND_MSC51_BUILD_DIR` for the MS C build or
+  `ASOUND_WATCOM_BUILD_DIR` for the legacy Watcom validation target.
+- Validation rejects `ORIGINAL_ASOUND` if it is byte-identical to the rebuilt
+  Watcom output. That usually means the game directory already contains the
+  replacement driver, so it is not an independent oracle.
+- Full block-level SSA is still diagnostic. The real gate is the ABI-level
+  SSA/Z3 comparison plus the KVM ABI smoke.
+- Some SSA ABI observables are intentionally narrowed for Watcom C prologue and
+  call-boundary shapes. The KVM ABI smoke checks the complete function-boundary
+  stack/register/memory effects.
+- Set `ASOUND_RUN_KVM_SMOKE=0` to force static-only validation.
+
+## Source Layout
+
+Compatibility wrapper and overlay layout:
+
+- `asound_watcom_header.asm`: first loaded data/header segment. Owns the marker
+  `F15 II AdLib 3-14-91`, overlay metadata, exported function table, fixed data
+  offsets, and OPL shadow region.
+- `asound_watcom_entry.c`: Watcom C implementation of the exported ASOUND slots
+  and `sample_set_variant_count`. It uses `__far __loadds` and `#pragma aux`
+  only for the ABI boundary; the wrapper behavior is C.
+- `asound_watcom_replacement.[ch]`: C declaration and typed view of the
+  assembly-owned overlay data.
+
+Behavior implementation:
+
+- `asound_watcom_driver.c`: stream and sample dispatch handlers called by the
+  C entry wrappers.
+- `asound_watcom_helpers.c`: AdLib/OPL helpers, bytecode interpreter, intro
+  handling, timer-facing service logic, sample playback, and minimal Watcom
+  aux I/O snippets.
+
+Oracles and references:
+
+- `asound_rebuild.asm`: labeled/disassembled source extracted from the F.EXE
+  listing and adjusted toward standalone ASOUND overlay state.
+- `asound_refbytes.asm`: byte-exact standalone ASOUND rebuild oracle.
+- `../asound_model_wip/`: portable host-side model and tests. This is the best
+  starting point for a clean modern rewrite.
+
+## Runtime Behavior
+
+Implemented behavior:
+
+- Sound dispatch starts decoded bytecode streams.
+- Timer ticks interpret stream bytecode.
+- OPL register shadow starts at data offset `0x0c32`.
+- OPL writes flush to ports `0x388/0x389`.
+- Instrument, volume, note, fnum, drone, noise, and key-on/off state are modeled.
+- Intro playback starts imported intro/release streams and waits for the game
+  timer service to advance them. Do not reintroduce a tight self-advance loop;
+  that makes music play too fast in game.
+- Sample entrypoints stream original sample ranges through the sample-to-OPL
+  volume table. This is not normal PCM playback; it drives OPL register `0x43`.
+
+Known compatibility caveats:
+
+- AdLib probe/calibration is simplified for DOSBox-style execution.
+- Sample playback blocks on the same timer countdown contract as the original
+  driver.
+- The C code still reflects 16-bit DOS constraints. Modern code should not keep
+  this global segmented-memory shape.
+
+## SDL / Modern Migration
+
+Goal: keep this working overlay as the oracle-backed compatibility target, then
+rewrite the behavior as a portable driver with a backend interface.
+
+Recommended modern layers:
+
+1. Portable ASOUND core
+   - stream state
+   - dispatch tables
+   - bytecode interpreter
+   - sample-range selection
+   - drone/noise state
+
+2. OPL backend
+   - register shadow
+   - instrument loading
+   - voice/note/fnum/volume writes
+   - OPL register events
+
+3. Platform backend
+   - timer/tick pacing
+   - keyboard/input query
+   - sample-memory access
+   - hardware/emulator write target
+
+Use SDL for audio device ownership, callback/threading, timing integration, and
+possibly event queues. SDL is not itself an OPL synthesizer. The SDL path still
+needs an OPL emulator/backend, for example the existing DOSBox OPL code or
+another OPL emulator.
+
+The modern API should pass an explicit context/backend object instead of reading
+DOS globals:
+
+```c
+typedef struct AsoundBackend {
+    void (*opl_write)(void* user, unsigned reg, unsigned value);
+    int  (*key_available)(void* user);
+    void (*wait_sample_timer_edge)(void* user);
+    unsigned (*sample_byte)(void* user, unsigned segment, unsigned offset);
+    void* user;
+} AsoundBackend;
+```
+
+For a DOS compatibility backend:
+
+- `opl_write` maps to `out 388h/389h`.
+- `key_available` maps to BIOS keyboard query.
+- `wait_sample_timer_edge` maps to PIT polling.
+- `sample_byte` maps to far sample memory.
+
+For an SDL backend:
+
+- `opl_write` should enqueue or immediately apply OPL register writes to an OPL
+  emulator that feeds the SDL audio callback.
+- Timer service should be driven by the game/emulation tick, not directly by the
+  SDL audio callback unless the queue is lock-free and deterministic.
+- Sample playback must preserve the original sample-to-OPL-register behavior
+  before any attempt to reinterpret it as PCM.
+
+Keep MT-32/Roland separate. `RSOUND.EXE` is a different driver path and should
+become an `mt32_backend`, not a variant of the AdLib backend.
+
+## Reusing `../asound_model_wip`
+
+Yes, use the model directory to make the modern driver clean.
+
+Useful files:
+
+- `asound_model.[ch]`: cleaner stream state, bytecode command handling, dispatch
+  offsets, sample range selection, and deterministic event tests.
+- `asopl.[ch]`: cleaner OPL state model, register shadow, instrument loading,
+  voice/note/fnum/volume logic, drone/noise helpers.
+- `asdrv51.c`: DOS/AdLib glue reference, especially `sample_to_opl`, sample
+  playback flow, timer coupling, and backend boundary ideas.
+- `asopl_inst.inc`: instrument data; already reused by the Watcom helper.
+- `test_asound_model.c`, `test_asopl.c`, `run_tests.sh`: portable regression
+  coverage for the cleaned core.
+
+Suggested migration order:
+
+1. Keep the working Watcom overlay unchanged as a binary-validated reference.
+2. Extract a portable core API from `asound_model.[ch]`.
+3. Move OPL behavior toward `asopl.[ch]`, but keep observable output as OPL
+   register writes/events.
+4. Add an explicit backend/context interface.
+5. Compare OPL write traces from the working overlay against the modern core.
+6. Add an SDL backend that consumes the same OPL write stream.
+
+## Agent Notes
+
+Important rules for future agents:
+
+- Do not make byte-diff improvements by breaking control flow. Runtime behavior
+  and dosunit validation win.
+- Do not put generated Watcom artifacts in this source directory. They belong in
+  `ASOUND_WATCOM_BUILD_DIR`.
+- If music plays too fast, check `adlib_play_intro_until_key`; it must wait for
+  timer-service progress, not call `adlib_service_tick()` in a tight loop.
+- If changing exported slot wrappers, rerun
+  `./compare_watcom_replacement_dosunit.sh` and require `ssa_abi_gate` 11/11.
+- If changing helper behavior, use KVM smoke and, where possible, add trace
+  comparisons against OPL writes.
+- The original overlay table entries are byte offsets into the code segment.
+  Do not guess sound enum names from newer headers unless call-site or table
+  evidence proves them.
+- `sample_variant_ranges` records are stored as `(end,start)`, not
+  `(start,end)`.
+- Sample ranges are not ASOUND-local offsets; setup stores the external sample
+  segment in `word_11C97`.
+
+Key offsets:
+
+```text
+0x0000  marker/header in loaded payload
+0x001c  overlay metadata/export table
+0x0267  word_11C97, external sample segment
+0x026d  sample_variant_ranges
+0x027b  sample_variant_max_index
+0x027c  word_11CAC, sample delay countdown
+0x027e  word_11CAE, drone pitch
+0x0286  byte_11CB6, drone enabled
+0x0b9c  six SoundStreamState records
+0x0c32  OPL register shadow
+0x0d32  OPL voice special records
+```
+
+## Byte-Exact ASM Oracle
+
+The byte-exact rebuild path is separate from the Watcom C replacement.
+
+```bash
+./build_refbytes.sh
+```
+
+Expected:
 
 ```text
 REFB.EXE is byte-identical to .../ASOUND.EXE
 ```
 
-## Labeled source status
-
-Run:
+The labeled MASM source path:
 
 ```bash
-bash src/custom/src_f15/asound_rebuild/build_labeled_masm6.sh
+./build_labeled_masm6.sh
 ```
 
-Expected result:
+Expected:
 
 ```text
-ref_payload=8876 new_payload=8876 extra=0
-common_diffs=0 ranges=0
 AS6L5.EXE is byte-identical to .../ASOUND.EXE
 ```
 
-The MASM 5 compatibility path is still available:
-
-```bash
-bash src/custom/src_f15/asound_rebuild/build_short.sh
-src/custom/src_f15/asound_rebuild/compare_payload.py \
-  --ref /home/xor/inertia_player/libdosbox-0.5x/src/custom/src_f15/ASOUND.EXE \
-  --new /tmp/A15/A5.EXE \
-  --lst /tmp/A15/A5.LST
-```
-
-`build_short.sh` copies the `asound_rebuild.asm` source to `/tmp/A15/ASOUND.ASM`, builds with MASM 5 + `kvikdos`, and compares payload bytes; run output reports any remaining non-identical regions.
-
-The original F.EXE-derived source was copied to:
-
-```text
-asound_rebuild.before_bytefix.asm
-```
-
-Important distinction:
-
-- `F.EXE` is a dump, so some non-zero values in the original extracted listing may be valid initialized/runtime state.
-- Standalone `ASOUND.EXE` is the overlay image on disk, so some of those same fields are zero or padding before the overlay is loaded/initialized.
-
-The labeled source has been adjusted for standalone ASOUND-on-disk initialization:
-
-- `seg11a3:01EE..023B` now matches standalone ASOUND padding and initial bytes.
-- Standalone-zero buffers in `seg11a3:0B9A..0C14` and `seg11a3:0C28..0D8F` are represented as labeled zero-filled blocks.
-- Code-segment data words at `seg127c:0009`, `seg127c:000B`, `seg127c:004D`, and `seg127c:004F` now match standalone ASOUND.
-- The initial byte-pair table at `seg11a3:001C` is represented as words because the disk bytes are word-sized metadata/offsets.
-- Selected MASM encodings are forced with `db`/`dw` where MASM 6.11 would otherwise choose shorter or sign-extended forms that do not match the original compiler output.
-- The non-overlay tail after the final `adlib_update_all_streams` terminator byte is excluded; standalone ASOUND ends at that `db 0`.
-
-### Sound stream runtime states
-
-`adlib_start_stream` initializes 20-byte stream state records passed in `BX`. The labeled source now defines these as `SoundStreamState`:
-
-- `stream_voice0_state`
-- `stream_voice1_state`
-- `stream_voice2_state`
-- `stream_voice3_state`
-- `stream_voice4_state`
-- `stream_voice5_state`
-
-Observed initializer in `adlib_start_stream`:
-
-- `BX`: target `SoundStreamState`
-- `CX`: stored at record offset `+0Ah` as `sss_stream_ptr`
-- `AX`: stored at record offset `+12h` as `sss_end_callback`
-- offset `+00h` is set to `1`
-- offset `+09h` is set to `0FFh`
-- offsets `+01h`, `+02h`, `+06h`, `+0Ch`, `+0Eh`, and `+10h` are cleared
-
-Current field names:
-
-- `+00 sss_ticks_left`: current event delay; zero means inactive or ready to read the next bytecode event.
-- `+01 sss_pitch_delta`: per-tick pitch delta set by bytecode opcode `FA`.
-- `+02 sss_volume_fade_step`: periodic volume fade step set by opcode `F8`.
-- `+03 sss_note`: current event/note byte.
-- `+04 sss_instrument`: instrument number set by opcode `FC`; only the low byte appears to be used.
-- `+06 sss_keyoff_gap_ticks`: number of ticks before event end to key off, set by opcode `FB`.
-- `+07 sss_keyoff_ticks_left`: countdown to automatic key-off for the current note.
-- `+08 sss_volume_fade_ticks_left`: countdown to next volume fade update.
-- `+09 sss_volume_fade_period`: reload period for volume fade updates, set by opcode `F8`.
-- `+0A sss_stream_ptr`: base pointer to the bytecode stream.
-- `+0C sss_stream_pos`: current byte offset into `sss_stream_ptr`.
-- `+0E sss_loop_pos`: loop marker offset set by opcode `FE`.
-- `+10 sss_loop_count`: repeat counter used by opcode `FF`.
-- `+12 sss_end_callback`: optional callback invoked by opcode `FD`.
-
-The F.EXE dump contains non-zero bytes in these records, probably initialized runtime state. Standalone ASOUND stores the same records zeroed in the overlay image.
-
-### AdLib bytecode streams
-
-The data that started at old label `unk_122BC` is not a fixed-size struct. It is a group of variable-length bytecode streams interpreted by `adlib_interpret_stream` through `SoundStreamState.sss_stream_ptr`.
-
-Detected stream groups:
-
-- `sound_stream_pitch_slide_1222e`: one short stream, not a struct. It loads instrument `08h`, volume `2Ch`, key-off gap `08h`, pitch delta `11h`, plays event/note `44h` for `14h` ticks, clears pitch delta, then terminates.
-- `adlib_intro_voice0` .. `adlib_intro_voice5`: loaded by `adlib_start_intro` into the six runtime records.
-- `adlib_release_voice0` .. `adlib_release_voice5`: loaded by `adlib_start_intro_release` into the same records.
-- `adlib_copyright`: string split out after `adlib_release_voice5`.
-
-Inferred bytecode format:
-
-- Bytes below `F8h` are event pairs: byte 0 is the event/note/control value, byte 1 is the tick count.
-- `00,00` terminates a stream.
-- `F8 xx yy` updates record bytes `+09h` and `+02h`.
-- `F9 xx` updates record byte `+05h` and calls `opl_set_voice_volume`.
-- `FA xx` updates record byte `+01h`.
-- `FB xx` updates record byte `+06h`.
-- `FC xx` updates record word/byte state at `+04h` and calls `opl_load_instrument`.
-- `FD` ends the stream or calls the callback stored in record `+12h`.
-- `FE` marks loop position in record `+0Eh`.
-- `FF xx` repeats from the `FE` loop mark using repeat count `xx`.
-
-### Overlay entry table
-
-The table after the two segment relocation words starts at `seg11a3:001C` and is stored as words.
-
-```text
-0064, 22AC, 0000, 000A, 0797, 07CC, 07DA, 0810,
-0878, 0885, 085D, 082A, 0850, 07F3
-```
-
-The first four words are overlay metadata:
-
-- `0064`: first overlay slot number. This matches the F14 sound driver range starting at slot `0x64`.
-- `22AC`: driver payload/image size in bytes, excluding the MZ header. It equals the `ref_payload=8876` (`0x22AC`) value reported by `compare_payload.py`.
-- `0000`: reserved/unused metadata word in this overlay image.
-- `000A`: exported slot count, followed by ten direct entry offsets.
-
-The remaining ten words are direct offsets into `seg127c`; no shift is needed. They match the generated F.EXE labels in `f.exe_seg127c.cpp` and `f.exe.h`:
-
-The newer F14 source tree names the same overlay ABI in `slot.asm` and `slot.h` as sound slots `audio_slot_64..audio_slot_6d` / C wrappers `audio_jump_64..audio_jump_6d`.
-
-ASOUND is only one implementation of this generic sound-driver ABI. The exported entry labels therefore use generic `sound_driver_*` names, while the F14 `audio_slot_*` names are kept as same-address ABI aliases:
-
-- `0797`: `sound_driver_setup` / `audio_slot_64` / `audio_jump_64(int16, int16)` / `kseg127c_797_proc`
-- `07CC`: `sound_driver_shutdown` / `audio_slot_65` / `audio_jump_65(void)` / `kseg127c_7cc_proc`
-- `07DA`: `sound_driver_dispatch_sound` / `audio_slot_66` / `audio_jump_66()` / `kret_41e_7da`
-- `0810`: `sound_driver_play_intro` / `audio_slot_67` / `audio_jump_67()` / `kret_41e_810`; F14 comments this as possible intro music.
-- `0878`: `sound_driver_enable_drone` / `audio_slot_68` / `audio_jump_68()` / `kret_41e_878`
-- `0885`: `sound_driver_disable_drone` / `audio_slot_69` / `audio_jump_69()` / `kret_41e_885`
-- `085D`: `sound_driver_set_drone_pitch` / `audio_slot_6a` / `audio_jump_6a()` / `kret_41e_85d`
-- `082A`: `sound_driver_timer_tick` / `audio_slot_6b` / `audio_jump_6b()` / `kret_41e_82a`; F14 calls this from `increaseTimerCounters`.
-- `0850`: `sound_driver_noise_tick` / `audio_slot_6c` / `audio_jump_6c()` / `kret_41e_850`; F14 calls this from the timer IRQ path.
-- `07F3`: `sound_driver_play_sample` / `audio_slot_6d` / `audio_jump_6d()` / `kret_41e_7f3`
-
-These are exported entry points only. Internal routines called by those entries, such as `sample_set_variant_count`, `adlib_reset_state`, `opl_clear_regs`, `adlib_service_tick`, and `adlib_update_noise_pitch`, are not necessarily listed in the overlay table.
-
-The main sound dispatch table used by `sound_driver_dispatch_sound` / `audio_slot_66` is labeled `audio_sound_dispatch_table`. ASOUND compares `BX` with `22h` and calls `word ptr cs:[BX+5E4h]`, so the safest interpretation is that callers pass a byte offset, likely `sound_id * 2`. The newer F14 headers define sound names in `SOUNDS.H` and `GSOUNDS.H`, but those names should only be attached where this ASOUND source or call-site evidence proves the mapping.
-
-### Sample ranges
-
-`sample_variant_ranges` was previously `unk_11C9D`. It is an array of three 4-byte records:
-
-```c
-struct SampleRange {
-    uint16_t end;
-    uint16_t start;
-};
-```
-
-Values:
-
-- `4797h..5C92h`
-- `5C93h..6A1Ah`
-- `6A1Bh..7D9Dh`
-
-The on-disk order is `(end,start)`, not `(start,end)`. `sample_play_case1` loads the first word into `CX` and the second into `BX`, pushes them, then pops them as `DI=end` and `SI=start`.
-
-The ranges are not ASOUND-local offsets. `sound_driver_setup` stores its first argument in `word_11C97`; `sample_stream_to_opl_volume` later switches `DS` to that segment and reads bytes from `SI=start` until `DI=end`. `sample_set_variant_count` chooses whether one, two, or three variants are valid from the setup argument, and `sample_play_case1` cycles through the valid range entries.
-
-### Function naming
-
-External ABI names:
-
-- `sound_driver_*`: generic exported sound-driver entry names used by ASOUND, ISOUND, NSOUND, and other driver implementations.
-- `audio_slot_64..audio_slot_6d`: F14 overlay-slot aliases from `slot.asm`.
-- `audio_jump_64..audio_jump_6d`: C-side wrapper names from `slot.h`.
-
-Names copied from the newer F14 source where the ABI matches:
-
-- `audio_slot_64..audio_slot_6d`: exported overlay slots from `slot.asm`.
-- `audio_jump_64..audio_jump_6d`: C-side wrappers from `slot.h`.
-- `audio_slot_6b`: called by F14 `increaseTimerCounters`.
-- `audio_slot_6c`: called by the F14 timer IRQ path.
-
-Names inferred from ASOUND behavior:
-
-- `adlib_probe_init`: probes the AdLib status bits and initializes timer/delay state.
-- `adlib_reset_state`: clears runtime stream state and silences selected OPL channels.
-- `opl_clear_regs`, `opl_shadow_write`, `opl_write_port`: OPL register clearing, shadow writes, and immediate port writes.
-- `adlib_start_stream`: initializes one `SoundStreamState`.
-- `adlib_start_intro`, `adlib_start_intro_release`, `adlib_play_intro_until_key`: intro-music stream setup/play/release sequence.
-- `adlib_service_tick`: timer-facing sequencer update, including the temporary stack switch used while updating all streams.
-- `adlib_update_noise_pitch`: updates pitch modulation/noise state for active channels.
-- `adlib_interpret_stream`, `adlib_update_all_streams`: bytecode interpreter and six-record update loop.
-- `opl_load_instrument`, `opl_key_on_voice`, `opl_key_off_voice`, `opl_set_voice_note`, `opl_set_voice_volume`: OPL voice/instrument control.
-- `sample_dispatch_table`, `sample_prepare_timer`, `sample_stream_to_opl_volume`, `sample_restore_timer`: the separate sample/playback path used by `audio_slot_6d`.
-
-The `audio_sound_dispatch_table` targets are deliberately named as `snd_disp_*` stream starters rather than `N_*` sound enums. The first target is a random stream starter, not an obvious `N_AllOff`, so `SOUNDS.H` / `GSOUNDS.H` are useful hints but not source of truth for that table yet.
-
-Use `compare_payload.py` to map each mismatch back to the MASM listing before changing the labeled source.
+Use these ASM oracles when investigating original layout, stream data, or
+metadata. Do not use them as a reason to make the C replacement byte-shaped
+unless that improves validated behavior.

@@ -11,8 +11,8 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 print_usage() {
 cat <<EOF_USAGE
 Usage:
-  ${SCRIPT_NAME} [PROFILE] [BUILD_DIR] [CMAKE_OPTIONS...]
-  ${SCRIPT_NAME} [PROFILE] [-- CMAKE_OPTIONS...]
+  ${SCRIPT_NAME} [--no-custom] [--run DOS_PATH] [--run-timeout SEC] [--trace-exec] [PROFILE] [BUILD_DIR] [CMAKE_OPTIONS...]
+  ${SCRIPT_NAME} [--no-custom] [--run DOS_PATH] [--run-timeout SEC] [--trace-exec] [PROFILE] [-- CMAKE_OPTIONS...]
 
 Positional arguments:
   PROFILE     Profile name under src/custom/ (default: instrument)
@@ -20,16 +20,30 @@ Positional arguments:
              Use 'instrument' for memory dump/runtime info without converted-game dispatch.
              e.g. instrument, f15, goody
 
-  BUILD_DIR   Optional CMake build directory (default: build/custom-<PROFILE>)
+  BUILD_DIR   Optional CMake build directory (default:
+             build/custom-<PROFILE> or build/custom-no-custom when disabled)
 
   CMAKE_OPTIONS
              Any additional CMake arguments passed to the configure step.
              Add -- before options only if you want to omit BUILD_DIR.
 
+Options:
+  --no-custom Disable custom instrumentation and build upstream-compatible DOSBox.
+              GAME profiles are ignored in this mode.
+  --run PATH   Run the built dosbox against a DOS program after the build finishes.
+              If PATH is a file like /path/F15.COM, the script mounts its directory
+              and runs the basename command, here 'F15'.
+  --run-timeout SEC
+              Kill the launched dosbox after SEC seconds (default: 5).
+  --trace-exec Enable extra EXEC tracing via DOSBOX_TRACE_EXEC=1 for --run.
+  -h, --help  Show this help text.
+
 Examples:
   ${SCRIPT_NAME}
   ${SCRIPT_NAME} goody
-  ${SCRIPT_NAME} goody build/goody
+  ${SCRIPT_NAME} --no-custom
+  ${SCRIPT_NAME} --no-custom --run /home/xor/games/f15/F15.COM
+  ${SCRIPT_NAME} --no-custom build/no_custom -DCMAKE_BUILD_TYPE=Release
   ${SCRIPT_NAME} goody -- -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++
 EOF_USAGE
 }
@@ -39,18 +53,73 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 	exit 0
 fi
 
-PROFILE="${1:-instrument}"
-BUILD_DIR="build/custom-${PROFILE}"
+DOSBOX_CUSTOM=ON
+PROFILE="instrument"
+BUILD_DIR=""
+RUN_PATH=""
+RUN_TIMEOUT=5
+TRACE_EXEC=OFF
 CMAKE_EXTRA=()
+POSITIONAL_ARGS=()
 
-if (( $# >= 2 )); then
-	if [[ "$2" == --* ]]; then
-		CMAKE_EXTRA=("${@:2}")
+while (( $# > 0 )); do
+	arg="$1"
+	shift
+	case "$arg" in
+		--no-custom)
+			DOSBOX_CUSTOM=OFF
+			;;
+		--run)
+			if (( $# == 0 )); then
+				echo "Error: --run requires a path argument."
+				exit 1
+			fi
+			RUN_PATH="$1"
+			shift
+			;;
+		--run-timeout)
+			if (( $# == 0 )); then
+				echo "Error: --run-timeout requires a seconds argument."
+				exit 1
+			fi
+			RUN_TIMEOUT="$1"
+			shift
+			;;
+		--trace-exec)
+			TRACE_EXEC=ON
+			;;
+		--)
+			CMAKE_EXTRA+=("$@")
+			break
+			;;
+		--help|-h)
+			print_usage
+			exit 0
+			;;
+		--*)
+			CMAKE_EXTRA+=("$arg")
+			;;
+		*)
+			POSITIONAL_ARGS+=("$arg")
+			;;
+	esac
+done
+
+if (( ${#POSITIONAL_ARGS[@]} >= 1 )); then
+	PROFILE="${POSITIONAL_ARGS[0]}"
+fi
+if (( ${#POSITIONAL_ARGS[@]} >= 2 )); then
+	BUILD_DIR="${POSITIONAL_ARGS[1]}"
+fi
+if (( ${#POSITIONAL_ARGS[@]} >= 3 )); then
+	CMAKE_EXTRA+=("${POSITIONAL_ARGS[@]:2}")
+fi
+
+if [[ -z "$BUILD_DIR" ]]; then
+	if [[ "$DOSBOX_CUSTOM" == "OFF" ]]; then
+		BUILD_DIR="build/custom-no-custom"
 	else
-		BUILD_DIR="$2"
-		if (( $# >= 3 )); then
-			CMAKE_EXTRA=("${@:3}")
-		fi
+		BUILD_DIR="build/custom-${PROFILE}"
 	fi
 fi
 
@@ -113,7 +182,7 @@ if [[ -z "$PROFILE" ]]; then
 	exit 1
 fi
 
-if [[ "$PROFILE" != "instrument" ]]; then
+if [[ "$DOSBOX_CUSTOM" != "OFF" && "$PROFILE" != "instrument" ]]; then
 	PROFILE_DIR="${REPO_ROOT}/src/custom/src_${PROFILE}"
 	if [[ ! -d "$PROFILE_DIR" && -d "${REPO_ROOT}/src/custom/${PROFILE}" ]]; then
 		PROFILE_DIR="${REPO_ROOT}/src/custom/${PROFILE}"
@@ -122,7 +191,7 @@ else
 	PROFILE_DIR=""
 fi
 
-if [[ "$PROFILE" != "instrument" && ! -d "$PROFILE_DIR" ]]; then
+if [[ "$DOSBOX_CUSTOM" != "OFF" && "$PROFILE" != "instrument" && ! -d "$PROFILE_DIR" ]]; then
 	mapfile -t PROFILES < <(find "${REPO_ROOT}/src/custom" -maxdepth 1 -type d -name 'src_*' -printf '%f\n' | sed 's/^src_//' | sort)
 	PROFILES=("instrument" "${PROFILES[@]}")
 	if (( ${#PROFILES[@]} == 0 )); then
@@ -145,10 +214,57 @@ mkdir -p "$BUILD_DIR_PATH"
 
 cd "$REPO_ROOT"
 
-echo "Configuring CMake profile '${PROFILE}' into '${BUILD_DIR_PATH}'."
-cmake -S . -B "$BUILD_DIR_PATH" -DDOSBOX_CUSTOM_PROFILE="$PROFILE" "${CMAKE_EXTRA[@]}"
+if [[ "$DOSBOX_CUSTOM" == "OFF" ]]; then
+	echo "Configuring CMake without custom runtime into '${BUILD_DIR_PATH}'."
+	CUSTOM_CMAKE_ARGS=(-DDOSBOX_CUSTOM=OFF)
+else
+	echo "Configuring CMake profile '${PROFILE}' into '${BUILD_DIR_PATH}'."
+	CUSTOM_CMAKE_ARGS=(-DDOSBOX_CUSTOM=ON -DDOSBOX_CUSTOM_PROFILE="$PROFILE")
+fi
+
+cmake -S . -B "$BUILD_DIR_PATH" "${CUSTOM_CMAKE_ARGS[@]}" "${CMAKE_EXTRA[@]}"
 
 echo "Building."
 cmake --build "$BUILD_DIR_PATH" -j"$(nproc 2> /dev/null || echo 2)"
+
+if [[ -n "$RUN_PATH" ]]; then
+	DOSBOX_BIN="$BUILD_DIR_PATH/dosbox"
+	if [[ ! -x "$DOSBOX_BIN" ]]; then
+		echo "Error: built executable not found: $DOSBOX_BIN"
+		exit 1
+	fi
+
+	if [[ ! -e "$RUN_PATH" ]]; then
+		echo "Error: run target not found: $RUN_PATH"
+		exit 1
+	fi
+
+	if [[ -d "$RUN_PATH" ]]; then
+		RUN_DIR="$RUN_PATH"
+		RUN_CMD=""
+	else
+		RUN_DIR=$(cd "$(dirname "$RUN_PATH")" && pwd)
+		RUN_BASE=$(basename "$RUN_PATH")
+		RUN_CMD="${RUN_BASE%.*}"
+	fi
+
+	echo "Running ${DOSBOX_BIN} against '${RUN_PATH}' (timeout ${RUN_TIMEOUT}s)."
+	RUN_ARGS=("./dosbox" "$RUN_DIR")
+	if [[ -n "$RUN_CMD" ]]; then
+		RUN_ARGS+=("-c" "$RUN_CMD")
+	fi
+
+	if [[ "$TRACE_EXEC" == "ON" ]]; then
+		(
+			cd "$BUILD_DIR_PATH"
+			env DOSBOX_TRACE_EXEC=1 timeout "${RUN_TIMEOUT}s" "${RUN_ARGS[@]}"
+		) || true
+	else
+		(
+			cd "$BUILD_DIR_PATH"
+			timeout "${RUN_TIMEOUT}s" "${RUN_ARGS[@]}"
+		) || true
+	fi
+fi
 
 echo "Done."

@@ -6,6 +6,7 @@ usage() {
 Usage:
   scripts/memdump-workflow.sh snap [--fix-relocs] [--dir <dosbox-working-dir>] [<label>]
   scripts/memdump-workflow.sh compare <dump_a> <dump_b> [offset_a offset_b]
+  scripts/memdump-workflow.sh recover <dump1> <dump2> [more dumps...] -o <unpacked.exe>
   scripts/memdump-workflow.sh -h | --help
 
 Examples:
@@ -15,7 +16,6 @@ USAGE
 }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-raw_name="#NONAME#.1"
 
 cmd="${1:-}"
 if [[ -z "$cmd" || "$cmd" == "-h" || "$cmd" == "--help" ]]; then
@@ -60,10 +60,10 @@ case "$cmd" in
 			esac
 		done
 
-		raw_dump="$dir/$raw_name"
-		if [[ ! -f "$raw_dump" ]]; then
-			echo "No \"$raw_dump\" found." >&2
-			echo "Press Ctrl+F2 in DOSBox, then rerun this command." >&2
+		raw_dump="$(find "$dir" -maxdepth 1 -type f -name '*.1' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
+		if [[ -z "$raw_dump" || ! -f "$raw_dump" ]]; then
+			echo "No dump (*.1) found in \"$dir\"." >&2
+			echo "Press Ctrl+0 in DOSBox, then rerun this command." >&2
 			exit 1
 		fi
 
@@ -76,12 +76,16 @@ case "$cmd" in
 		out="$out_dir/$label.1"
 
 		cp "$raw_dump" "$out"
-		echo "Saved snapshot: $out"
+		echo "Saved snapshot: $out (from $(basename "$raw_dump"))"
 
 		if [[ "$fix_relocs" == "1" ]]; then
 			python3 "$script_dir/check_fix_relocs.py" "$out"
 			echo "Applied check_fix_relocs.py to: $out"
 		fi
+		;;
+
+	recover)
+		python3 "$script_dir/mz_dump_pair.py" "$@"
 		;;
 
 	compare|diff)

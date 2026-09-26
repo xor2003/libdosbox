@@ -393,7 +393,7 @@ Use it to reapply hooks after syncing with upstream `dosbox-staging`, or when po
 
 ### Profiles
 
-- `Ctrl+F2`: dump executable and memory image (`#NONAME#.1`) via `DumpExe1`
+- `Ctrl+0`: dump executable and memory image via `DumpExe1`
 - `Ctrl+F3`: cycle profile (`analysis -> tracing -> compare -> collect_only`)
 - `Ctrl+F4`: set `analysis`
 - `Ctrl+F5`: set `tracing`
@@ -408,7 +408,7 @@ Use it to reapply hooks after syncing with upstream `dosbox-staging`, or when po
 - `Ctrl+5`: toggle `collect_rt_info_vars`
 - `Ctrl+6`: toggle `complex_self_modifications`
 - `Ctrl+7`: toggle `abi_collection_mode`
-- `Ctrl+0`: show current custom status
+- `Ctrl+8`: show current custom status
 
 
 ### Order / precedence
@@ -421,18 +421,28 @@ Use it to reapply hooks after syncing with upstream `dosbox-staging`, or when po
 
 ## Memory dump workflow (legacy `0.5x` style)
 
-`Ctrl+F2` is mapped to `m2c::DumpExe1` in this branch. On KDE/Linux, `Alt+F2` is commonly reserved, so `Ctrl+F2` is the safer default.
+`Ctrl+0` triggers the dumpexe snapshot in this branch.
 
-The output file is always named `#NONAME#.1` in the current DOSBox working directory.
+The output file is timestamped:
+
+- `<program>.<YYYYMMDD-HHMMSS-mmm>.1`
+
+The dump covers:
+
+- memory from the active PSP
+- through the last contiguous MCB owned by that PSP
+- clamped below linear `0xA0000`
+
+If there is no active PSP-owned range, no dump file is written.
 
 Workflow:
 
-1. Run program, then press `Ctrl+F2` in DOSBox to produce `#NONAME#.1`.
+1. Run program, then press `Ctrl+0` in DOSBox to produce a timestamped `.1` dump.
 2. Snapshot it:
    - `./scripts/memdump-workflow.sh snap --dir /home/xor/games/f15 pre_eatmem`
 3. In DOSBox, run `eatmem.com`.
 4. Restart and re-run the target program.
-5. Press `Ctrl+F2` again and snapshot a second file:
+5. Press `Ctrl+0` again and snapshot a second file:
    - `./scripts/memdump-workflow.sh snap --dir /home/xor/games/f15 post_eatmem`
 6. Compare:
    - `./scripts/memdump-workflow.sh compare /home/xor/games/f15/.memdump/pre_eatmem.1 /home/xor/games/f15/.memdump/post_eatmem.1`
