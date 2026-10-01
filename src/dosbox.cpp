@@ -167,6 +167,13 @@ static Bitu Normal_Loop()
 	Bits ret;
 
 	while (true) {
+#if C_DEBUG && C_GDBSERVER
+		// Service the GDB stub: break-in requests pause the machine by
+		// switching the loop handler to DEBUG_GdbLoop.
+		if (DEBUG_GdbRunningPoll()) {
+			return 0;
+		}
+#endif
 		if (PIC_RunQueue()) {
 			ret = (*cpudecoder)();
 			if (ret < 0) {
@@ -848,6 +855,22 @@ void DOSBOX_Init()
 
 #if C_DEBUG
 	secprop = control->AddSection_prop("debug", &DEBUG_Init);
+#if C_GDBSERVER
+	pbool = secprop->Add_bool("gdbserver", only_at_start, false);
+	pbool->Set_help(
+	        "Enable the GDB remote debugging server (disabled by default).\n"
+	        "Connect with 'target remote localhost:gdbserver_port' from a GDB\n"
+	        "client (use 'set architecture i386'). The emulated machine keeps\n"
+	        "running until the client issues a stop request ('?'/Ctrl-C) or a\n"
+	        "breakpoint is hit. Breakpoints are address comparisons done by\n"
+	        "the CPU core - guest memory is never modified, and breakpoints\n"
+	        "work in ROM; they require an interpreter core ('core = normal',\n"
+	        "'prefetch', 'simple' or 'full').");
+
+	pint = secprop->Add_int("gdbserver_port", only_at_start, 1234);
+	pint->SetMinMax(1, 65535);
+	pint->Set_help("TCP port the GDB server listens on (1234 by default).");
+#endif
 #endif
 
 	// Configure Sound Blaster and ESS

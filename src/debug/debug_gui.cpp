@@ -173,9 +173,9 @@ static void DrawBars(void) {
 	/* Show the Register bar */
 	mvaddstr(1-1,0, "-----(Register Overview                   )-----                                ");
 	/* Show the Data Overview bar perhaps with more special stuff in the end */
-	mvaddstr(6-1,0, "-----(Data Overview   Scroll: page up/down)-----                                ");
+	mvaddstr(6-1,0, "-----(Data Overview   Scroll: page up/down  Edit: TAB)-----                      ");
 	/* Show the Code Overview perhaps with special stuff in bar too */  
-	mvaddstr(15-1,0,"-----(Code Overview   Scroll: up/down     )-----                                ");
+	mvaddstr(15-1,0,"-----(Code Overview   Scroll: up/down  Follow: F2  Back: F12)-----              ");
 	/* Show the Variable Overview bar */
 	mvaddstr(27-1,0,"-----(Variable Overview                   )-----                                ");
 	/* Show the Output OverView */

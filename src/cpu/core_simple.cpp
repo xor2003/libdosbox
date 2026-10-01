@@ -159,6 +159,12 @@ Bits CPU_Core_Simple_Run() noexcept
 			FillFlags();
 			return debugCallback;
 		};
+#else
+		// Address-compare breakpoints: no INT3 patching needed, works in ROM
+		if (DEBUG_Breakpoint()) {
+			FillFlags();
+			return debugCallback;
+		}
 #endif
 		cycle_count++;
 #endif

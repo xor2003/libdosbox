@@ -266,6 +266,13 @@ Bits CPU_Core_Normal_Run() noexcept
 			FillFlags();
 			return debugCallback;
 		};
+#else
+		// Address-compare breakpoints: no INT3 patching is needed here,
+		// so breakpoints work on ROM and never alter guest memory.
+		if (DEBUG_Breakpoint()) {
+			FillFlags();
+			return debugCallback;
+		}
 #endif
 		cycle_count++;
 #endif

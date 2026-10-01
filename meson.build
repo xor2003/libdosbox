@@ -455,6 +455,15 @@ if get_option('enable_debugger') == 'heavy'
     conf_data.set10('C_HEAVY_DEBUG', true)
 endif
 
+# The GDB remote debugging server requires the internal debugger
+gdbserver_opt = get_option('enable_gdbserver')
+have_debugger = get_option('enable_debugger') != 'none'
+if gdbserver_opt.enabled() and not have_debugger
+    error('enable_gdbserver requires enable_debugger != none')
+endif
+conf_data.set10('C_GDBSERVER',
+                have_debugger and not gdbserver_opt.disabled())
+
 foreach osdef : ['LINUX', 'WIN32', 'MACOSX', 'BSD']
     if conf_data.has(osdef)
         conf_data.set10('C_DIRECTSERIAL', true)

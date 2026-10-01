@@ -137,6 +137,13 @@ option(
 )
 
 option(
+    'enable_gdbserver',
+    type: 'feature',
+    value: 'auto',
+    description: 'Build emulator with the GDB remote debugging server (requires enable_debugger != none).',
+)
+
+option(
     'dynamic_core',
     type: 'combo',
     choices: ['auto', 'dyn-x86', 'dynrec', 'none'],

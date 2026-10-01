@@ -14,6 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(OPT_DEBUG "Enable debugging" $<IF:$<CONFIG:Debug>,ON,OFF>)
 option(OPT_HEAVY_DEBUG "Enable heavy debugging" OFF)
+option(OPT_GDBSERVER "Enable the GDB remote debugging server" ON)
 
 if (OPT_HEAVY_DEBUG)
 	set(OPT_DEBUG ON CACHE INTERNAL "")
@@ -108,6 +109,10 @@ setConfig01(C_DIRECTSERIAL ON)
 
 if (OPT_DEBUG)
 	setConfig01(C_DEBUG ON)
+
+	if (OPT_GDBSERVER)
+		setConfig01(C_GDBSERVER ON)
+	endif()
 
 	if (OPT_HEAVY_DEBUG)
 		setConfig01(C_HEAVY_DEBUG ON)

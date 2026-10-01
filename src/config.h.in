@@ -115,6 +115,9 @@
 // Define to 1 to enable heavy debugging (requires C_DEBUG)
 #mesondefine C_HEAVY_DEBUG
 
+// Define to 1 to enable the GDB remote debugging server (requires C_DEBUG)
+#mesondefine C_GDBSERVER
+
 // Define to 1 to enable MT-32 emulator
 #mesondefine C_MT32EMU
 

@@ -72,6 +72,7 @@ static void DrawVariables(void);
 
 char* AnalyzeInstruction(char* inst, bool saveSelector);
 uint32_t GetHexValue(char* str, char*& hex);
+static void CodeViewGoTo(uint16_t seg, uint32_t ofs, bool remember = true);
 
 #if 0
 class DebugPageHandler final : public PageHandler {
@@ -160,6 +161,13 @@ struct SCodeViewData {
 
 static uint16_t dataSeg = 0;
 static uint32_t dataOfs = 0;
+
+// Hex editing mode for the data window (toggled with TAB): the arrow
+// keys move a cursor over the 8x16 hex dump and hex digits overwrite
+// nibbles directly in guest memory.
+static bool    dataEditMode       = false;
+static uint8_t dataEditPos        = 0; // byte index inside the window
+static bool    dataEditHighNibble = true;
 
 static bool showExtend    = true;
 static bool showPrintable = true;
@@ -325,6 +333,14 @@ public:
 	uint8_t GetIntNr() const noexcept { return intNr; }
 	uint16_t GetValue() const noexcept { return ahValue; }
 	uint16_t GetOther() const noexcept { return alValue; }
+	// Original guest byte saved when a software breakpoint was patched in
+	uint8_t GetPatchedByte() const noexcept { return oldData; }
+	void SetPatchedByte(uint8_t value) noexcept { oldData = value; }
+	// A breakpoint with noPatch is detected purely by comparing cs:eip
+	// against the breakpoint address in the CPU core's instruction loop;
+	// nothing is written to guest memory, so it also works in ROM.
+	bool GetNoPatch() const noexcept { return noPatch; }
+	void SetNoPatch(bool value) noexcept { noPatch = value; }
 #if C_HEAVY_DEBUG
 	void FlagMemoryAsRead()
 	{
@@ -353,6 +369,7 @@ public:
 	static bool				CheckBreakpoint		(Bitu seg, Bitu off);
 	static bool				CheckIntBreakpoint	(PhysPt adr, uint8_t intNr, uint16_t ahValue, uint16_t alValue);
 	static CBreakpoint*		FindPhysBreakpoint	(uint16_t seg, uint32_t off, bool once);
+	static CBreakpoint*		FindPhysBreakpoint	(PhysPt adr, bool once);
 	static CBreakpoint*		FindOtherActiveBreakpoint(PhysPt adr, CBreakpoint* skip);
 	static bool				IsBreakpoint		(uint16_t seg, uint32_t off);
 	static bool				DeleteBreakpoint	(uint16_t seg, uint32_t off);
@@ -373,8 +390,9 @@ private:
 	uint16_t ahValue = 0;
 	uint16_t alValue = 0;
 	// Shared
-	bool active = 0;
-	bool once   = 0;
+	bool active  = 0;
+	bool once    = 0;
+	bool noPatch = 0;
 #if C_HEAVY_DEBUG
 	bool memory_was_read = false;
 
@@ -386,12 +404,14 @@ CBreakpoint::CBreakpoint(void):
 type(BKPNT_UNKNOWN),
 location(0),oldData(0xCC),
 segment(0),offset(0),intNr(0),ahValue(0),alValue(0),
-active(false),once(false){ }
+active(false),once(false),noPatch(false){ }
 
 void CBreakpoint::Activate(bool _active)
 {
 #if !C_HEAVY_DEBUG
-	if (GetType() == BKPNT_PHYSICAL) {
+	// Patchless breakpoints never touch guest memory; they are caught by
+	// the per-instruction address check in the interpreter CPU cores.
+	if (GetType() == BKPNT_PHYSICAL && !noPatch) {
 		if (_active) {
 			// Set 0xCC and save old value
 			uint8_t data = mem_readb(location);
@@ -662,6 +682,16 @@ CBreakpoint* CBreakpoint::FindPhysBreakpoint(uint16_t seg, uint32_t off, bool on
 	return nullptr;
 }
 
+CBreakpoint* CBreakpoint::FindPhysBreakpoint(PhysPt adr, bool once)
+{
+	for (auto &bp : BPoints) {
+		if (bp->GetType() == BKPNT_PHYSICAL && bp->GetLocation() == adr &&
+		    bp->GetOnce() == once)
+			return bp;
+	}
+	return nullptr;
+}
+
 CBreakpoint* CBreakpoint::FindOtherActiveBreakpoint(PhysPt adr, CBreakpoint* skip)
 {
 	for (auto &bp : BPoints)
@@ -681,6 +711,9 @@ bool CBreakpoint::DeleteBreakpoint(uint16_t seg, uint32_t off)
 	CBreakpoint* bp = FindPhysBreakpoint(seg, off, false);
 	if (bp) {
 		BPoints.remove(bp);
+		// Restore the original instruction byte if the breakpoint is
+		// currently patched into guest memory
+		bp->Activate(false);
 		delete bp;
 		return true;
 	}
@@ -715,6 +748,138 @@ void CBreakpoint::ShowList(void)
 		nr++;
 	}
 }
+
+// --- Breakpoint services for the GDB stub glue ----------------------------
+//
+// The GDB remote stub lives in gdb_server.cpp. It never touches the
+// CBreakpoint list directly; these wrappers are the whole surface the
+// stub needs (see debug.h for the contract).
+
+bool DEBUG_IsInteractiveDebuggerActive()
+{
+	return debugging;
+}
+
+void DEBUG_BpArmAll()
+{
+	CBreakpoint::ActivateBreakpoints();
+}
+
+void DEBUG_BpDisarmAll()
+{
+	CBreakpoint::DeactivateBreakpoints();
+}
+
+void DEBUG_BpArmAllExcept(const PhysPt addr)
+{
+	CBreakpoint::ActivateBreakpointsExceptAt(addr);
+}
+
+bool DEBUG_BpAddPatchless(const PhysPt addr)
+{
+	// Idempotent only for gdb-owned breakpoints: a patched user breakpoint
+	// at the same address must not suppress creation, or the user deleting
+	// theirs would silently disarm the gdb one. Duplicate patchless
+	// breakpoints are harmless (nothing is written to guest memory).
+	for (auto& bp : BPoints) {
+		if (bp->GetType() == BKPNT_PHYSICAL && bp->GetNoPatch() &&
+		    !bp->GetOnce() && bp->GetLocation() == addr)
+			return true;
+	}
+
+	auto* bp = new CBreakpoint();
+	bp->SetAddress(addr);
+	bp->SetOnce(false);
+	bp->SetNoPatch(true);
+	BPoints.push_front(bp);
+	// Arm immediately, so breakpoints are effective even when the stub
+	// installs them while the machine is still running.
+	bp->Activate(true);
+	return true;
+}
+
+bool DEBUG_BpRemovePhys(const PhysPt addr)
+{
+	// Only remove gdb-owned (patchless) breakpoints. Z0 was a no-op when a
+	// user breakpoint already covered the address, so z0 must not delete it.
+	for (auto i = BPoints.begin(); i != BPoints.end(); ++i) {
+		auto bp = *i;
+		if (bp->GetType() == BKPNT_PHYSICAL && bp->GetLocation() == addr &&
+		    bp->GetNoPatch() && !bp->GetOnce()) {
+			BPoints.erase(i);
+			bp->Activate(false);
+			delete bp;
+			return true;
+		}
+	}
+	return false;
+}
+
+void DEBUG_BpAddOnceAt(const uint16_t seg, const uint32_t off,
+                       const bool patchless)
+{
+	if (auto* bp = CBreakpoint::AddBreakpoint(seg, off, true))
+		bp->SetNoPatch(patchless);
+}
+
+bool DEBUG_BpAddIntBp(const uint8_t nr, const uint16_t ah, const uint16_t al)
+{
+	auto* bp = CBreakpoint::AddIntBreakpoint(nr, ah, al, false);
+	if (!bp)
+		return false;
+	// Interrupt breakpoints are never patched; the flag only marks the
+	// breakpoint as owned by the gdb stub for DEBUG_BpRemoveGdbOwned.
+	bp->SetNoPatch(true);
+	bp->Activate(true);
+	return true;
+}
+
+void DEBUG_BpRemoveGdbOwned()
+{
+	// The stub only creates patchless breakpoints; DeleteAll would also
+	// remove breakpoints the user set in the built-in debugger.
+	for (auto i = BPoints.begin(); i != BPoints.end();) {
+		auto bp = *i;
+		if (bp->GetNoPatch()) {
+			i = BPoints.erase(i);
+			bp->Activate(false);
+			delete bp;
+		} else {
+			++i;
+		}
+	}
+}
+
+// Find an active software breakpoint patching the given physical address.
+// Patchless breakpoints never write 0xCC, so they are excluded here.
+static CBreakpoint* find_patched_bp(const PhysPt addr)
+{
+	for (auto& bp : BPoints) {
+		if (bp->GetType() == BKPNT_PHYSICAL && bp->IsActive() &&
+		    !bp->GetNoPatch() && bp->GetLocation() == addr)
+			return bp;
+	}
+	return nullptr;
+}
+
+bool DEBUG_BpReadPatchedByte(const PhysPt addr, uint8_t& val)
+{
+	const auto bp = find_patched_bp(addr);
+	if (!bp)
+		return false;
+	val = bp->GetPatchedByte();
+	return true;
+}
+
+bool DEBUG_BpWritePatchedByte(const PhysPt addr, const uint8_t val)
+{
+	const auto bp = find_patched_bp(addr);
+	if (!bp)
+		return false;
+	bp->SetPatchedByte(val);
+	return true;
+}
+
 
 bool DEBUG_Breakpoint(void)
 {
@@ -784,7 +949,14 @@ static void DrawData(void) {
 		for (int x=0; x<16; x++) {
 			address = GetAddress(dataSeg,add);
 			if (mem_readb_checked(address,&ch)) ch=0;
-			mvwprintw (dbg.win_data,y,14+3*x,"%02X",ch);
+			if (dataEditMode && (uint8_t)(add - dataOfs) == dataEditPos &&
+			    has_colors()) {
+				wattrset(dbg.win_data,COLOR_PAIR(PAIR_BLACK_GREY));
+				mvwprintw (dbg.win_data,y,14+3*x,"%02X",ch);
+				wattrset(dbg.win_data,0);
+			} else {
+				mvwprintw (dbg.win_data,y,14+3*x,"%02X",ch);
+			}
 			if (showPrintable) {
 				if (ch<32 || !isprint(*reinterpret_cast<unsigned char*>(&ch))) ch='.';
 				mvwaddch (dbg.win_data,y,63+x,ch);
@@ -1176,6 +1348,64 @@ bool ParseCommand(char* str) {
 		return true;
 	}
 
+	if (command == "FIND") { // Search memory for a byte sequence
+		uint16_t seg = (uint16_t)GetHexValue(found,found); found++; // skip ":"
+		uint32_t ofs = GetHexValue(found,found); found++;
+		uint32_t len = GetHexValue(found,found); found++;
+		if (!len || len > 0x100000) len = 0x10000;
+		uint8_t pattern[64];
+		uint16_t patlen = 0;
+		while (*found == ' ') found++;
+		if (*found == '"') { // quoted ASCII string
+			found++;
+			while (*found && *found != '"' && patlen < sizeof(pattern))
+				pattern[patlen++] = (uint8_t)*found++;
+		} else { // hex byte list, spaces optional ("EB ED" == "EBED")
+			char hexbuf[2 * sizeof(pattern) + 1];
+			uint16_t hexlen = 0;
+			while (*found && hexlen < sizeof(hexbuf) - 1) {
+				if (*found != ' ') hexbuf[hexlen++] = *found;
+				found++;
+			}
+			hexbuf[hexlen] = 0;
+			for (uint16_t i = 0; i + 1 < hexlen; i += 2) {
+				const char hi = hexbuf[i], lo = hexbuf[i + 1];
+				if (!isxdigit((unsigned char)hi) ||
+				    !isxdigit((unsigned char)lo)) {
+					patlen = 0;
+					break;
+				}
+				char pair[3] = {hi, lo, 0};
+				pattern[patlen++] = (uint8_t)strtoul(pair, nullptr, 16);
+			}
+		}
+		if (!patlen) {
+			DEBUG_ShowMsg("DEBUG: FIND needs a pattern: FIND seg:ofs len bb [bb..] | \"text\".\n");
+			return true;
+		}
+		uint32_t foundcount = 0;
+		for (uint32_t i = 0; i + patlen <= len; i++) {
+			PhysPt adr = GetAddress(seg, ofs + i);
+			uint16_t j = 0;
+			for (; j < patlen; j++) {
+				uint8_t val;
+				if (mem_readb_checked(adr + j, &val) || val != pattern[j])
+					break;
+			}
+			if (j == patlen) {
+				DEBUG_ShowMsg("FOUND at %04X:%04X\n", seg, ofs + i);
+				if (++foundcount >= 8) {
+					DEBUG_ShowMsg("... (more matches suppressed)\n");
+					break;
+				}
+				i += patlen - 1; // skip past this match
+			}
+		}
+		DEBUG_ShowMsg("DEBUG: Search done, %u match%s.\n", foundcount,
+		              foundcount == 1 ? "" : "es");
+		return true;
+	}
+
 	if (command == "BP") { // Add new breakpoint
 		uint16_t seg = (uint16_t)GetHexValue(found,found);found++; // skip ":"
 		uint32_t ofs = GetHexValue(found,found);
@@ -1272,9 +1502,7 @@ bool ParseCommand(char* str) {
 		uint16_t codeSeg = (uint16_t)GetHexValue(found,found); found++;
 		uint32_t codeOfs = GetHexValue(found,found);
 		DEBUG_ShowMsg("DEBUG: Set code overview to %04X:%04X\n",codeSeg,codeOfs);
-		codeViewData.useCS	= codeSeg;
-		codeViewData.useEIP = codeOfs;
-		codeViewData.cursorPos = 0;
+		CodeViewGoTo(codeSeg,codeOfs);
 		return true;
 	}
 
@@ -1386,9 +1614,7 @@ bool ParseCommand(char* str) {
 		if (found[0] != 0) {
 			uint8_t intNr = (uint8_t)GetHexValue(found,found);
 			DEBUG_ShowMsg("DEBUG: Set code overview to interrupt handler %X\n",intNr);
-			codeViewData.useCS	= mem_readw(intNr*4+2);
-			codeViewData.useEIP = mem_readw(intNr*4);
-			codeViewData.cursorPos = 0;
+			CodeViewGoTo(mem_readw(intNr*4+2),mem_readw(intNr*4));
 			return true;
 		}
 	}
@@ -1436,6 +1662,7 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("BPDEL  [bpNr] / *         - Delete breakpoint nr / all.\n");
 		DEBUG_ShowMsg("C / D  [segment]:[offset] - Set code / data view address.\n");
 		DEBUG_ShowMsg("DOS MCBS                  - Show Memory Control Block chain.\n");
+		DEBUG_ShowMsg("FIND [seg]:[ofs] [len] [bb..] | \"text\" - Search memory for bytes.\n");
 		DEBUG_ShowMsg("INT [nr] / INTT [nr]      - Execute / Trace into interrupt.\n");
 #if C_HEAVY_DEBUG
 		DEBUG_ShowMsg("LOG [num]                 - Write cpu log file.\n");
@@ -1469,12 +1696,15 @@ bool ParseCommand(char* str) {
 
 		DEBUG_ShowMsg("HELP                      - Help\n");
 		DEBUG_ShowMsg("Keys------------------------------------------------\n");
+		DEBUG_ShowMsg("F2                        - Follow branch under code cursor.\n");
 		DEBUG_ShowMsg("F3/F6                     - Previous command in history.\n");
 		DEBUG_ShowMsg("F4/F7                     - Next command in history.\n");
 		DEBUG_ShowMsg("F5                        - Run.\n");
 		DEBUG_ShowMsg("F8                        - Toggle printable characters.\n");
 		DEBUG_ShowMsg("F9                        - Set/Remove breakpoint.\n");
 		DEBUG_ShowMsg("F10/F11                   - Step over / trace into instruction.\n");
+		DEBUG_ShowMsg("F12 / Backspace (empty)   - Return to previous code view location.\n");
+		DEBUG_ShowMsg("TAB                       - Toggle data window hex edit mode.\n");
 		DEBUG_ShowMsg("ALT + D/E/S/X/B           - Set data view to DS:SI/ES:DI/SS:SP/DS:DX/ES:BX.\n");
 		DEBUG_ShowMsg("Escape                    - Clear input line.");
 		DEBUG_ShowMsg("Up/Down                   - Move code view cursor.\n");
@@ -1666,6 +1896,224 @@ char* AnalyzeInstruction(char* inst, bool saveSelector) {
 	return result;
 }
 
+// Code view navigation history (Insight-style browsing): following a
+// branch or jumping to another location pushes the old position onto
+// this stack; F12 / Backspace on an empty input line pops it.
+struct SCodeViewLoc {
+	uint16_t seg;
+	uint32_t ofs;
+	int      cursor;
+};
+static std::vector<SCodeViewLoc> codeViewHistory;
+static constexpr size_t MAX_CODEVIEW_HISTORY = 64;
+
+// Move the code view to seg:ofs, optionally remembering the current
+// position so the user can navigate back.
+static void CodeViewGoTo(uint16_t seg, uint32_t ofs, bool remember)
+{
+	if (remember) {
+		codeViewHistory.push_back({codeViewData.useCS,
+		                           codeViewData.useEIP,
+		                           codeViewData.cursorPos});
+		if (codeViewHistory.size() > MAX_CODEVIEW_HISTORY)
+			codeViewHistory.erase(codeViewHistory.begin());
+	}
+	codeViewData.useCS     = seg;
+	codeViewData.useEIP    = ofs;
+	codeViewData.cursorPos = 0;
+}
+
+static void CodeViewGoBack()
+{
+	if (codeViewHistory.empty()) {
+		DEBUG_ShowMsg("DEBUG: No previous code view location.\n");
+		return;
+	}
+	const SCodeViewLoc loc = codeViewHistory.back();
+	codeViewHistory.pop_back();
+	codeViewData.useCS     = loc.seg;
+	codeViewData.useEIP    = loc.ofs;
+	codeViewData.cursorPos = loc.cursor;
+}
+
+// Resolve the control-flow target of the instruction under the code view
+// cursor (direct jmp/call/jcc/loop/int plus ret forms via the stack).
+static bool GetFollowTarget(uint16_t& newSeg, uint32_t& newOfs)
+{
+	char dline[200];
+	PhysPt start = GetAddress(codeViewData.cursorSeg, codeViewData.cursorOfs);
+	DasmI386(dline, start, codeViewData.cursorOfs, cpu.code.big);
+
+	char instu[200];
+	safe_strcpy(instu, dline);
+	upcase(instu);
+
+	char mnemonic[16] = {};
+	if (sscanf(instu, "%15s", mnemonic) != 1)
+		return false;
+
+	// Return instructions: the target is on the stack.
+	const bool code32 = (cpu.pmode && !(reg_flags & FLAG_VM))
+	                        ? cpu.code.big
+	                        : false;
+	const PhysPt stackTop = GetAddress(SegValue(ss), reg_esp);
+	if (!strcmp(mnemonic, "IRET") || !strcmp(mnemonic, "IRETD")) {
+		newOfs  = code32 ? mem_readd(stackTop) : mem_readw(stackTop);
+		newSeg  = code32 ? mem_readw(stackTop + 4) : mem_readw(stackTop + 2);
+		return true;
+	}
+	if (!strcmp(mnemonic, "RETF") || !strcmp(mnemonic, "RETFW")) {
+		newOfs  = code32 ? mem_readd(stackTop) : mem_readw(stackTop);
+		newSeg  = code32 ? mem_readw(stackTop + 4) : mem_readw(stackTop + 2);
+		return true;
+	}
+	if (!strcmp(mnemonic, "RET") || !strcmp(mnemonic, "RETN")) {
+		newSeg  = codeViewData.cursorSeg;
+		newOfs  = code32 ? mem_readd(stackTop) : mem_readw(stackTop);
+		return true;
+	}
+
+	// Software interrupt: the target is the IVT entry.
+	if (!strcmp(mnemonic, "INT")) {
+		char* operand = instu + strlen(mnemonic);
+		while (*operand == ' ') operand++;
+		char* endp = nullptr;
+		const auto intNr = (uint8_t)strtoul(operand, &endp, 16);
+		if (endp == operand || *endp)
+			return false;
+		newSeg = mem_readw(intNr * 4 + 2);
+		newOfs = mem_readw(intNr * 4);
+		return true;
+	}
+
+	// Direct branches: mnemonics starting with 'J', CALL or LOOP.
+	const bool isBranch = (mnemonic[0] == 'J') || !strcmp(mnemonic, "CALL") ||
+	                      !strncmp(mnemonic, "LOOP", 4);
+	if (!isBranch)
+		return false;
+
+	char* operand = instu + strlen(mnemonic);
+	while (*operand == ' ') operand++;
+	// Skip distance keywords
+	for (const char* kw : {"SHORT ", "NEAR ", "FAR "}) {
+		if (!strncmp(operand, kw, strlen(kw))) {
+			operand += strlen(kw);
+			while (*operand == ' ') operand++;
+			break;
+		}
+	}
+	// Indirect ("[...]") and register operands ("near eax") cannot be
+	// resolved statically; note E/A are hex digits, so a plain isxdigit
+	// check is not enough - the operand must parse as hex completely.
+	if (strchr(operand, '[') || !isxdigit((unsigned char)operand[0]))
+		return false;
+
+	char* endp = nullptr;
+	const char* colon = strchr(operand, ':');
+	if (colon) {
+		// Far branch: "seg:ofs"
+		newSeg = (uint16_t)strtoul(operand, &endp, 16);
+		if (endp != colon)
+			return false;
+		newOfs = strtoul(colon + 1, &endp, 16);
+		if (*endp)
+			return false;
+	} else {
+		newSeg = codeViewData.cursorSeg;
+		newOfs = strtoul(operand, &endp, 16);
+		if (*endp)
+			return false;
+	}
+	return true;
+}
+
+static void DEBUG_CodeViewFollow()
+{
+	uint16_t newSeg;
+	uint32_t newOfs;
+	if (GetFollowTarget(newSeg, newOfs)) {
+		CodeViewGoTo(newSeg, newOfs);
+		DEBUG_ShowMsg("DEBUG: Following to %04X:%04X\n", newSeg, newOfs);
+	} else {
+		DEBUG_ShowMsg("DEBUG: No direct branch target at cursor.\n");
+	}
+}
+
+// Handles one keypress while the data window is in hex edit mode.
+// Returns true if the key was consumed.
+static bool ProcessDataEditKey(int key)
+{
+	switch (key) {
+	case 27: // ESC
+	case '\t':
+		dataEditMode = false;
+		DEBUG_ShowMsg("DEBUG: Data edit mode off.\n");
+		return true;
+	case KEY_LEFT:
+		if (dataEditPos > 0)
+			dataEditPos--;
+		return true;
+	case KEY_RIGHT:
+		if (dataEditPos < 127)
+			dataEditPos++;
+		return true;
+	case KEY_UP:
+		if (dataEditPos >= 16)
+			dataEditPos -= 16;
+		else
+			dataOfs -= 16;
+		return true;
+	case KEY_DOWN:
+		if (dataEditPos <= 111)
+			dataEditPos += 16;
+		else
+			dataOfs += 16;
+		return true;
+	case KEY_PPAGE:
+		dataOfs -= 16;
+		return true;
+	case KEY_NPAGE:
+		dataOfs += 16;
+		return true;
+	case KEY_HOME:
+		dataEditPos -= dataEditPos % 16; // start of row
+		return true;
+	case KEY_END:
+		dataEditPos += 15 - (dataEditPos % 16); // end of row
+		if (dataEditPos > 127)
+			dataEditPos = 127;
+		return true;
+	default:
+		break;
+	}
+
+	int nib = -1;
+	if (key >= '0' && key <= '9') {
+		nib = key - '0';
+	} else {
+		key = toupper(key);
+		if (key >= 'A' && key <= 'F')
+			nib = key - 'A' + 10;
+	}
+	if (nib < 0)
+		return false; // modal: non-hex keys are ignored
+
+	const PhysPt adr = GetAddress(dataSeg, dataOfs + dataEditPos);
+	uint8_t val      = 0;
+	if (mem_readb_checked(adr, &val))
+		val = 0;
+	if (dataEditHighNibble) {
+		val = (val & 0x0F) | (uint8_t)(nib << 4);
+		dataEditHighNibble = false;
+	} else {
+		val = (val & 0xF0) | (uint8_t)nib;
+		dataEditHighNibble = true;
+		if (dataEditPos < 127)
+			dataEditPos++;
+	}
+	mem_writeb_checked(adr, val);
+	return true;
+}
 
 int32_t DEBUG_Run(int32_t amount,bool quickexit) {
 	skipFirstInstruction = true;
@@ -1693,7 +2141,7 @@ uint32_t DEBUG_CheckKeys(void) {
 	bool skipDraw = false;
 	int key=getch();
 
-	if (key >='1' && key <='5' && safe_strlen(codeViewData.inputStr) == 0) {
+	if (!dataEditMode && key >='1' && key <='5' && safe_strlen(codeViewData.inputStr) == 0) {
 		const int32_t v[] ={5,500,1000,5000,10000};
 
 		ret = DEBUG_Run(v[key - '1'],true);
@@ -1743,6 +2191,12 @@ uint32_t DEBUG_CheckKeys(void) {
 			break;
 		}
 #endif
+		// In data edit mode every key is handled by the hex editor;
+		// TAB/ESC leave the mode again.
+		if (dataEditMode && key > 0) {
+			if (ProcessDataEditKey(key)) DEBUG_DrawScreen();
+			return 0;
+		}
 		switch (toupper(key)) {
 		case 27:	// escape (a bit slow): Clears line. and processes alt commands.
 			key=getch();
@@ -1781,6 +2235,18 @@ uint32_t DEBUG_CheckKeys(void) {
 				break;
 			}
 			break;
+		case '\t':	// TAB: enter data window hex edit mode
+				dataEditMode       = true;
+				dataEditPos        = 0;
+				dataEditHighNibble = true;
+				DEBUG_ShowMsg("DEBUG: Data edit mode on (arrows move, hex keys write, TAB/ESC exits).\n");
+				break;
+		case KEY_F(2):	// Follow branch target under cursor
+				DEBUG_CodeViewFollow();
+				break;
+		case KEY_F(12):	// Return to previous code view location
+				CodeViewGoBack();
+				break;
 		case KEY_PPAGE :	dataOfs -= 16;	break;
 		case KEY_NPAGE :	dataOfs += 16;	break;
 
@@ -1897,7 +2363,12 @@ uint32_t DEBUG_CheckKeys(void) {
 		case KEY_BACKSPACE: //backspace (linux)
 		case 0x7f:	// backspace in some terminal emulators (linux)
 		case 0x08:	// delete 
-				if (codeViewData.inputPos == 0) break;
+				if (codeViewData.inputPos == 0) {
+					// On an empty input line Backspace returns to the
+					// previous code view location (follow history).
+					if (!codeViewData.inputStr[0]) CodeViewGoBack();
+					break;
+				}
 				codeViewData.inputPos--;
 				[[fallthrough]];
 		case KEY_DC: // delete character
@@ -1975,6 +2446,14 @@ void DEBUG_Enable(bool pressed)
 {
 	if (!pressed)
 		return;
+
+#if C_GDBSERVER
+	// While a client is connected the gdb stub owns the machine: the
+	// pause key becomes a break-in request instead of opening the
+	// curses debugger (which would fight the stub over the run state).
+	if (DEBUG_GdbOnHalt(true))
+		return;
+#endif
 
 	// Maybe construct the debugger's UI
 	static bool was_ui_started = false;
@@ -2352,17 +2831,30 @@ void DEBUG_CheckExecuteBreakpoint(uint16_t seg, uint32_t off)
 		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
 		pDebugcom = nullptr;
 	}
+#if C_GDBSERVER
+	else
+		DEBUG_GdbOnExec(seg, off);
+#endif
 }
+
 
 Bitu DEBUG_EnableDebugger()
 {
 	exitLoop = true;
+#if C_GDBSERVER
+	// With a connected client the stub takes over instead of the curses UI
+	if (DEBUG_GdbOnHalt(false))
+		return 0;
+#endif
 	DEBUG_Enable(true);
 	CPU_Cycles=CPU_CycleLeft=0;
 	return 0;
 }
 
 void DEBUG_ShutDown(Section * /*sec*/) {
+#if C_GDBSERVER
+	DEBUG_GdbShutdown();
+#endif
 	CBreakpoint::DeleteAll();
 	CDebugVar::DeleteAll();
 	curs_set(old_cursor_state);
@@ -2390,6 +2882,12 @@ void DEBUG_Init(Section* sec) {
 	CALLBACK_Setup(debugCallback,DEBUG_EnableDebugger,CB_RETF,"debugger");
 	/* shutdown function */
 	sec->AddDestroyFunction(&DEBUG_ShutDown);
+
+#if C_GDBSERVER
+	const auto sprop = static_cast<Section_prop*>(sec);
+	if (sprop->Get_bool("gdbserver"))
+		DEBUG_GdbInit(sprop->Get_int("gdbserver_port"));
+#endif
 }
 
 // DEBUGGING VAR STUFF

@@ -4,6 +4,10 @@ libdebug_sources = files(
     'debug_gui.cpp',
 )
 
+if conf_data.get('C_GDBSERVER', 0) == 1
+    libdebug_sources += files('gdb_server.cpp')
+endif
+
 libdebug = static_library(
     'debug',
     libdebug_sources,
@@ -14,6 +18,7 @@ libdebug = static_library(
         ghc_dep,
         libiir_dep,
         libloguru_dep,
+        winsock2_dep,
     ],
     cpp_args: warnings,
 )
